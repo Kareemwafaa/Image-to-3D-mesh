@@ -26,8 +26,9 @@ npx ng test --watch=false
 
 | Call | Used for |
 | --- | --- |
-| `POST /generate` (multipart `image`, `remove_background`) | starts a job, returns `{job_id}` |
+| `POST /generate` (multipart `image`, `remove_background`, `mc_resolution`) | starts a job, returns `{job_id}` |
 | `GET /jobs/{job_id}` every 1.5 s | status `queued` / `running` / `succeeded` / `failed`, `progress` 0..1, `error` |
+| `GET /health` every 30 s | server status dot in the top bar |
 | `GET /jobs/{job_id}/result` | the `.glb`, fetched once and reused for the viewer and the download |
 
 The 3D viewer is Google's [`<model-viewer>`](https://modelviewer.dev), loaded lazily.

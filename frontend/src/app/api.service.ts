@@ -19,6 +19,12 @@ export interface Job {
   error: string | null;
 }
 
+export interface GenerateOptions {
+  removeBackground: boolean;
+  /** Marching-cubes grid resolution; higher is more detailed and slower. */
+  resolution?: number;
+}
+
 const DEFAULT_API_URL = 'http://localhost:8000';
 
 @Injectable({ providedIn: 'root' })
@@ -33,10 +39,20 @@ export class ApiService {
     return this.apiUrlPromise;
   }
 
-  async createJob(image: File, removeBackground: boolean, signal?: AbortSignal): Promise<string> {
+  async health(signal?: AbortSignal): Promise<boolean> {
+    try {
+      const res = await fetch(`${await this.apiUrl()}/health`, { cache: 'no-store', signal });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async createJob(image: File, opts: GenerateOptions, signal?: AbortSignal): Promise<string> {
     const form = new FormData();
     form.append('image', image);
-    form.append('remove_background', String(removeBackground));
+    form.append('remove_background', String(opts.removeBackground));
+    if (opts.resolution) form.append('mc_resolution', String(opts.resolution));
     const res = await fetch(`${await this.apiUrl()}/generate`, { method: 'POST', body: form, signal });
     if (!res.ok) throw new Error(await errorMessage(res));
     const body = await res.json();

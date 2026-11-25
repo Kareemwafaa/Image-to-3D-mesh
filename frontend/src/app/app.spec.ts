@@ -10,8 +10,8 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
-    expect(el.querySelector('h1')?.textContent).toContain('Image to 3D');
-    const btn = el.querySelector<HTMLButtonElement>('button.primary');
+    expect(el.querySelector('.brand-name')?.textContent).toContain('Image to 3D');
+    const btn = el.querySelector<HTMLButtonElement>('button.btn.primary');
     expect(btn?.disabled).toBe(true);
   });
 });
