@@ -234,3 +234,4 @@ model-viewer { --poster-color: transparent; background: transparent; }
 @media (prefers-reduced-motion: reduce) {
   .progress.indeterminate > div { animation-duration: 3s; }
 }
+.stage-note { margin: 28px 0 0; max-width: 400px; font-size: 12px; color: #6f717a; }

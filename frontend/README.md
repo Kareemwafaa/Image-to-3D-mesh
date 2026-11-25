@@ -27,9 +27,12 @@ npx ng test --watch=false
 | Call | Used for |
 | --- | --- |
 | `POST /generate` (multipart `image`, `remove_background`, `mc_resolution`) | starts a job, returns `{job_id}` |
-| `GET /jobs/{job_id}` every 1.5 s | status `queued` / `running` / `succeeded` / `failed`, `progress` 0..1, `error` |
+| `GET /jobs/{job_id}` every 2.5 s | status, `progress` 0..1, optional `stage` (segmenting, multiview, reconstructing, meshing), `error`; up to 5 transient failures are retried |
 | `GET /health` every 30 s | server status dot in the top bar |
 | `GET /jobs/{job_id}/result` | the `.glb`, fetched once and reused for the viewer and the download |
 
 The 3D viewer is Google's [`<model-viewer>`](https://modelviewer.dev), loaded lazily.
 Client-side limits (PNG/JPEG/WebP, 10 MB) are a guess; the backend has the final say.
+
+Jobs take a few minutes, so the running job's id is kept in the address bar
+(`?job=...`). Reloading the page resumes it instead of losing it.

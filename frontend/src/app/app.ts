@@ -1,8 +1,11 @@
 import { Component, computed, ElementRef, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
-import { ApiService, JobStatus } from './api.service';
+import { ApiError, ApiService, JobStatus } from './api.service';
 import { ModelViewer } from './model-viewer';
 
-const POLL_MS = 1500;
+const POLL_MS = 2500;
+// Consecutive failed status checks tolerated before giving up (network blips
+// and 5xx are common over a multi-minute job).
+const MAX_POLL_FAILURES = 5;
 const HEALTH_MS = 30000;
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp'];
 // Client-side guard only; the backend enforces its own limit (413).
@@ -11,12 +14,23 @@ const MAX_BYTES = 10 * 1024 * 1024;
 type Phase =
   | { kind: 'idle' }
   | { kind: 'uploading' }
-  | { kind: 'processing'; jobId: string; status: JobStatus; progress: number | null }
+  | { kind: 'processing'; jobId: string; status: JobStatus; progress: number | null; stage: string | null }
   | { kind: 'fetching'; jobId: string }
   | { kind: 'done'; jobId: string; modelUrl: string; size: number; seconds: number }
   | { kind: 'error'; message: string; jobId?: string };
 
-export const STEPS = ['Upload', 'Queue', 'Reconstruct', 'Export'] as const;
+// Pipeline steps shown while a job runs. The middle four match the backend's
+// optional "stage" field on GET /jobs/{id}.
+const PIPELINE = [
+  { key: 'upload', label: 'Upload', status: 'Uploading' },
+  { key: 'queue', label: 'Queue', status: 'Queued' },
+  { key: 'segmenting', label: 'Segment', status: 'Removing background' },
+  { key: 'multiview', label: 'Multi-view', status: 'Generating views' },
+  { key: 'reconstructing', label: 'Reconstruct', status: 'Reconstructing' },
+  { key: 'meshing', label: 'Mesh', status: 'Extracting mesh' },
+  { key: 'export', label: 'Export', status: 'Exporting' },
+] as const;
+type StepKey = (typeof PIPELINE)[number]['key'];
 
 @Component({
   selector: 'app-root',
@@ -32,7 +46,11 @@ export class App implements OnInit, OnDestroy {
   private healthTimer?: ReturnType<typeof setInterval>;
   private jobId?: string;
 
-  protected readonly steps = STEPS;
+  /** Whether the running job removes the background (adds the Segment step). */
+  private readonly segmentStep = signal(true);
+  protected readonly steps = computed(() =>
+    PIPELINE.filter((s) => s.key !== 'segmenting' || this.segmentStep()),
+  );
   protected readonly resolutions = [
     { value: 128, label: 'Draft' },
     { value: 256, label: 'Standard' },
@@ -54,14 +72,17 @@ export class App implements OnInit, OnDestroy {
   });
   protected readonly baseName = computed(() => this.file()?.name.replace(/\.[^.]+$/, '') || 'mesh');
 
-  /** Index into STEPS of the step currently running. */
-  protected readonly stepIndex = computed(() => {
+  private readonly stepKey = computed<StepKey | null>(() => {
     const p = this.phase();
-    if (p.kind === 'uploading') return 0;
-    if (p.kind === 'processing') return p.status === 'queued' ? 1 : 2;
-    if (p.kind === 'fetching') return 3;
-    return -1;
+    if (p.kind === 'uploading') return 'upload';
+    if (p.kind === 'fetching') return 'export';
+    if (p.kind !== 'processing') return null;
+    if (p.status === 'queued') return 'queue';
+    const known = this.steps().find((s) => s.key === p.stage);
+    return known ? known.key : this.segmentStep() ? 'segmenting' : 'multiview';
   });
+  /** Index into steps() of the step currently running. */
+  protected readonly stepIndex = computed(() => this.steps().findIndex((s) => s.key === this.stepKey()));
   protected readonly percent = computed(() => {
     const p = this.phase();
     if (p.kind !== 'processing' || p.status !== 'running' || p.progress == null) return null;
@@ -73,11 +94,9 @@ export class App implements OnInit, OnDestroy {
       case 'idle':
         return this.file() ? 'Ready' : 'Waiting for image';
       case 'uploading':
-        return 'Uploading';
       case 'processing':
-        return p.status === 'queued' ? 'Queued' : 'Reconstructing';
       case 'fetching':
-        return 'Exporting';
+        return PIPELINE.find((s) => s.key === this.stepKey())?.status ?? 'Working';
       case 'done':
         return 'Complete';
       case 'error':
@@ -93,6 +112,10 @@ export class App implements OnInit, OnDestroy {
     const check = () => this.api.health().then((ok) => this.apiOnline.set(ok));
     check();
     this.healthTimer = setInterval(check, HEALTH_MS);
+
+    // A job id in the URL means a reload during a long job: pick it back up.
+    const jobId = new URLSearchParams(location.search).get('job');
+    if (jobId) this.run(null, jobId);
   }
 
   ngOnDestroy() {
@@ -137,58 +160,85 @@ export class App implements OnInit, OnDestroy {
     this.setPhase({ kind: 'idle' });
   }
 
-  protected async generate() {
+  protected generate() {
     const file = this.file();
-    if (!file) return;
+    if (file) this.run(file);
+  }
+
+  /** Uploads `file` as a new job, or resumes polling `resumeId`, until the mesh is loaded. */
+  private async run(file: File | null, resumeId?: string) {
     this.cancel();
     const ctrl = new AbortController();
     this.abort = ctrl;
     const { signal } = ctrl;
-    this.jobId = undefined;
-    const start = this.startTimer();
+    this.jobId = resumeId;
+    let start = this.startTimer();
 
     try {
-      this.setPhase({ kind: 'uploading' });
-      const jobId = await this.api.createJob(
-        file,
-        { removeBackground: this.removeBg(), resolution: this.resolution() },
-        signal,
-      );
-      this.jobId = jobId;
-      this.setPhase({ kind: 'processing', jobId, status: 'queued', progress: null });
-
-      let job = await this.api.getJob(jobId, signal);
-      while (job.status === 'queued' || job.status === 'running') {
-        this.setPhase({ kind: 'processing', jobId, status: job.status, progress: job.progress });
-        await sleep(POLL_MS, signal);
-        job = await this.api.getJob(jobId, signal);
+      let jobId: string;
+      if (file) {
+        this.segmentStep.set(this.removeBg());
+        this.setPhase({ kind: 'uploading' });
+        jobId = await this.api.createJob(
+          file,
+          { removeBackground: this.removeBg(), resolution: this.resolution() },
+          signal,
+        );
+      } else {
+        jobId = resumeId!;
       }
-      if (job.status === 'failed') throw new Error(job.error || 'The reconstruction failed on the server.');
+      this.jobId = jobId;
+      setJobInUrl(jobId);
+      this.setPhase({ kind: 'processing', jobId, status: 'queued', progress: null, stage: null });
 
-      // Fetch the .glb once and reuse it for both the viewer and the download
-      // link (an <a download> pointing at another origin is ignored by browsers).
-      this.setPhase({ kind: 'fetching', jobId });
-      const glb = await this.api.fetchResult(job, signal);
-      this.setPhase({
-        kind: 'done',
-        jobId,
-        modelUrl: URL.createObjectURL(glb),
-        size: glb.size,
-        seconds: Math.round((Date.now() - start) / 1000),
-      });
-      // On narrow screens the viewer sits below the controls; bring it into view.
-      const stage = this.stage()?.nativeElement;
-      if (stage && stage.getBoundingClientRect().top > window.innerHeight * 0.5) {
-        stage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      let failures = 0;
+      for (;;) {
+        let job;
+        try {
+          job = await this.api.getJob(jobId, signal);
+          failures = 0;
+        } catch (err) {
+          const transient = err instanceof TypeError || (err instanceof ApiError && err.status >= 500);
+          if (!transient || ++failures >= MAX_POLL_FAILURES) throw err;
+          await sleep(POLL_MS * failures, signal);
+          continue;
+        }
+        if (!file && job.createdAt && job.createdAt < start) start = this.startTimer(job.createdAt);
+        if (job.status === 'failed') throw new Error(job.error || 'The reconstruction failed on the server.');
+        if (job.status === 'succeeded') {
+          // Fetch the .glb once and reuse it for both the viewer and the download
+          // link (an <a download> pointing at another origin is ignored by browsers).
+          this.setPhase({ kind: 'fetching', jobId });
+          const glb = await this.api.fetchResult(job, signal);
+          this.setPhase({
+            kind: 'done',
+            jobId,
+            modelUrl: URL.createObjectURL(glb),
+            size: glb.size,
+            seconds: Math.round((Date.now() - start) / 1000),
+          });
+          // On narrow screens the viewer sits below the controls; bring it into view.
+          const stage = this.stage()?.nativeElement;
+          if (stage && stage.getBoundingClientRect().top > window.innerHeight * 0.5) {
+            stage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+          return;
+        }
+        this.setPhase({ kind: 'processing', jobId, status: job.status, progress: job.progress, stage: job.stage });
+        await sleep(POLL_MS, signal);
       }
     } catch (err) {
       if (signal.aborted) return;
-      const message =
+      let message =
         err instanceof TypeError
           ? 'Could not reach the generation server. Check that the backend is running.'
           : err instanceof Error
             ? err.message
             : String(err);
+      if (!file && err instanceof ApiError && err.status === 404) {
+        message = 'That job no longer exists on the server. Upload the image again to start a new one.';
+        setJobInUrl(null);
+      }
       this.setPhase({ kind: 'error', message, jobId: this.jobId });
     } finally {
       if (this.abort === ctrl) this.stopTimer();
@@ -197,11 +247,13 @@ export class App implements OnInit, OnDestroy {
 
   protected cancelJob() {
     this.cancel();
+    setJobInUrl(null);
     this.setPhase({ kind: 'idle' });
   }
 
   protected reset() {
     this.cancel();
+    setJobInUrl(null);
     this.file.set(null);
     this.setPreview(null);
     this.setPhase({ kind: 'idle' });
@@ -241,10 +293,9 @@ export class App implements OnInit, OnDestroy {
     this.phase.set(p);
   }
 
-  private startTimer() {
+  private startTimer(start = Date.now()) {
     this.stopTimer();
-    const start = Date.now();
-    this.elapsed.set(0);
+    this.elapsed.set(Math.max(0, Math.round((Date.now() - start) / 1000)));
     this.timer = setInterval(() => this.elapsed.set(Math.round((Date.now() - start) / 1000)), 500);
     return start;
   }
@@ -267,4 +318,12 @@ function sleep(ms: number, signal: AbortSignal) {
       { once: true },
     );
   });
+}
+
+/** Keeps the running job's id in the address bar so a reload can resume it. */
+function setJobInUrl(jobId: string | null) {
+  const url = new URL(location.href);
+  if (jobId) url.searchParams.set('job', jobId);
+  else url.searchParams.delete('job');
+  history.replaceState(history.state, '', url);
 }

@@ -15,14 +15,26 @@ export interface Job {
   jobId: string;
   status: JobStatus;
   progress: number | null;
+  /** Pipeline stage while running: segmenting, multiview, reconstructing, meshing. */
+  stage: string | null;
   resultUrl: string | null;
   error: string | null;
+  createdAt: number | null;
 }
 
 export interface GenerateOptions {
   removeBackground: boolean;
   /** Marching-cubes grid resolution; higher is more detailed and slower. */
   resolution?: number;
+}
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 const DEFAULT_API_URL = 'http://localhost:8000';
@@ -54,7 +66,7 @@ export class ApiService {
     form.append('remove_background', String(opts.removeBackground));
     if (opts.resolution) form.append('mc_resolution', String(opts.resolution));
     const res = await fetch(`${await this.apiUrl()}/generate`, { method: 'POST', body: form, signal });
-    if (!res.ok) throw new Error(await errorMessage(res));
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
     const body = await res.json();
     const id = body.job_id ?? body.id;
     if (!id) throw new Error('The server did not return a job id.');
@@ -66,14 +78,16 @@ export class ApiService {
       cache: 'no-store',
       signal,
     });
-    if (!res.ok) throw new Error(await errorMessage(res));
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
     const raw = await res.json();
     return {
       jobId: String(raw.job_id ?? raw.id ?? id),
       status: normalizeStatus(raw.status),
       progress: typeof raw.progress === 'number' ? raw.progress : null,
+      stage: typeof raw.stage === 'string' ? raw.stage.toLowerCase() : null,
       resultUrl: raw.result_url ?? null,
       error: raw.error ?? null,
+      createdAt: parseTime(raw.created_at),
     };
   }
 
@@ -119,4 +133,12 @@ function normalizeStatus(s: unknown): JobStatus {
     default:
       return 'queued';
   }
+}
+
+function parseTime(v: unknown): number | null {
+  if (typeof v === 'number') return v < 1e12 ? v * 1000 : v;
+  if (typeof v !== 'string') return null;
+  // FastAPI may omit the timezone on naive datetimes; treat those as UTC.
+  const t = Date.parse(/(?:[zZ]|[+-]\d\d:?\d\d)$/.test(v) ? v : v + 'Z');
+  return Number.isNaN(t) ? null : t;
 }

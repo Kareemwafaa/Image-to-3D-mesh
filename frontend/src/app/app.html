@@ -128,9 +128,9 @@
     } @else if (busy()) {
       <div class="stage-center">
         <ol class="steps">
-          @for (s of steps; track s; let i = $index) {
+          @for (s of steps(); track s.key; let i = $index) {
             <li [class.done]="i < stepIndex()" [class.current]="i === stepIndex()">
-              <span class="step-dot"></span>{{ s }}
+              <span class="step-dot"></span>{{ s.label }}
             </li>
           }
         </ol>
@@ -141,6 +141,9 @@
           <span>{{ percent() !== null ? percent() + '%' : statusText() + '…' }}</span>
           <span>{{ formatTime(elapsed()) }}</span>
         </div>
+        <p class="stage-note">
+          A mesh usually takes 2 to 4 minutes. Reloading this page won't lose the job.
+        </p>
       </div>
     } @else if (p.kind === 'error') {
       <div class="stage-center" role="alert">
