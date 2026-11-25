@@ -1,7 +1,7 @@
 <input #fileInput type="file" class="visually-hidden" [accept]="accept" (change)="onFileChange($event)" />
 
 <header class="nav">
-  <a class="wordmark" href="/" aria-label="Facet home">
+  <a class="wordmark" href="./" aria-label="Facet home">
     <svg viewBox="0 0 32 32" aria-hidden="true">
       <path d="M16 3 28 10v12l-12 7-12-7V10z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
       <path d="M16 3v9m0 0 12-2M16 12 4 10m12 2-7 15m7-15 7 15M4 22l5 5h14l5-5" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity=".55" />
@@ -18,10 +18,11 @@
     }
   </ol>
 
-  <span class="server" [attr.data-state]="apiOnline() === null ? 'checking' : apiOnline() ? 'online' : 'offline'"
-    [title]="apiOnline() === false ? 'The generation server is not responding' : ''">
+  <button type="button" class="server" (click)="openServerDialog()"
+    [attr.data-state]="apiOnline() === null ? 'checking' : apiOnline() ? 'online' : 'offline'"
+    [attr.aria-label]="'Generation server: ' + (apiOnline() === null ? 'connecting' : apiOnline() ? 'ready' : 'offline') + '. Change server'">
     <span class="dot"></span>{{ apiOnline() === null ? 'Connecting' : apiOnline() ? 'Server ready' : 'Server offline' }}
-  </span>
+  </button>
 </header>
 
 <main class="page">
@@ -59,6 +60,21 @@
         @if (p.kind === 'error') {
           <p class="banner" role="alert">{{ p.message }}</p>
         }
+      }
+
+      @if (apiOnline() === false) {
+        <aside class="offline-note">
+          <span class="dot" aria-hidden="true"></span>
+          <p>
+            <strong>No generation server is connected.</strong>
+            The model runs on a GPU that is switched on for demos only. Start your own for free in a
+            Colab or Kaggle notebook, then paste its link here.
+          </p>
+          <div class="offline-actions">
+            <button type="button" class="btn quiet" (click)="openServerDialog()">Connect a server</button>
+            <a class="btn link" [href]="runYourOwnUrl" target="_blank" rel="noopener">How to run one</a>
+          </div>
+        </aside>
       }
 
       <ul class="tips">
@@ -168,7 +184,7 @@
           <button class="btn primary wide" (click)="generate()">
             {{ p.kind === 'error' ? 'Try again' : 'Generate 3D model' }}
           </button>
-          <p class="eta">Takes about 2 to 4 minutes.</p>
+          <p class="eta">Takes a few minutes on a GPU.</p>
           <button class="btn link" (click)="browse()">Use a different photo</button>
         </div>
       } @else {
@@ -200,10 +216,54 @@
         </ol>
 
         <p class="reassure">
-          Usually 2 to 4 minutes. You can switch tabs; reloading this page won't lose the job.
+          Usually a few minutes. You can switch tabs; reloading this page won't lose the job.
         </p>
         <button class="btn link" (click)="cancelJob()">Stop waiting</button>
       }
     </div>
   </section>
 </ng-template>
+
+<dialog #serverDialog class="server-dialog" aria-labelledby="server-dialog-title" (click)="$event.target === serverDialog ? closeServerDialog() : null">
+  <form (submit)="connectServer($event)">
+    <h2 id="server-dialog-title">Generation server</h2>
+    <p class="dialog-note">
+      Facet sends your photo to a backend running the reconstruction on a GPU. Paste the link your
+      Colab or Kaggle notebook printed (it ends in <span class="mono">trycloudflare.com</span>), or
+      any URL where the backend runs.
+    </p>
+
+    <label class="field">
+      <span class="option-name">Server URL</span>
+      <input type="text" name="apiUrl" inputmode="url" autocomplete="url" spellcheck="false"
+        placeholder="https://example.trycloudflare.com"
+        [value]="serverDraft()" (input)="serverDraft.set($any($event.target).value); serverTest.set('idle')" />
+    </label>
+
+    <p class="dialog-status mono" aria-live="polite" [attr.data-state]="serverTest()">
+      @switch (serverTest()) {
+        @case ('testing') { Checking the server… }
+        @case ('ok') { Connected. }
+        @case ('fail') { No answer from that URL. It may still be starting, or not allow this site (CORS). }
+        @case ('invalid') { That doesn't look like a web address. }
+        @default { Now using: {{ apiUrl() ?? '…' }}{{ apiSource() === 'default' ? ' (default)' : '' }} }
+      }
+    </p>
+
+    <div class="dialog-actions">
+      @if (apiSource() === 'custom') {
+        <button type="button" class="btn link" (click)="useDefaultServer()">Use the default</button>
+      }
+      <span class="spacer"></span>
+      <button type="button" class="btn quiet" (click)="closeServerDialog()">Cancel</button>
+      @if (serverTest() === 'fail') {
+        <button type="button" class="btn quiet" (click)="saveServerAnyway()">Use anyway</button>
+      }
+      <button type="submit" class="btn primary" [disabled]="serverTest() === 'testing'">Connect</button>
+    </div>
+    <p class="dialog-foot">
+      Tip: share <span class="mono">?api=&lt;server URL&gt;</span> at the end of this page's address and
+      visitors connect automatically. <a [href]="runYourOwnUrl" target="_blank" rel="noopener">Run your own server</a>.
+    </p>
+  </form>
+</dialog>
