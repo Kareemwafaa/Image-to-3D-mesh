@@ -10,7 +10,7 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
-    expect(el.querySelector('h1')?.textContent).toContain('3D model');
+    expect(el.querySelector('h1')?.textContent).toContain('Mesh out');
     expect(el.querySelector('.drop')).toBeTruthy();
     expect(el.querySelector('.flow li.on')?.textContent).toContain('Photo');
   });

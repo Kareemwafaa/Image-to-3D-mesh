@@ -1,12 +1,13 @@
 <input #fileInput type="file" class="visually-hidden" [accept]="accept" (change)="onFileChange($event)" />
 
 <header class="nav">
-  <a class="wordmark" href="/">
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 2.5 20.5 7.2v9.6L12 21.5l-8.5-4.7V7.2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-      <path d="M3.5 7.2 12 12l8.5-4.8M12 12v9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+  <a class="wordmark" href="/" aria-label="Facet home">
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M16 3 28 10v12l-12 7-12-7V10z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+      <path d="M16 3v9m0 0 12-2M16 12 4 10m12 2-7 15m7-15 7 15M4 22l5 5h14l5-5" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity=".55" />
+      <circle cx="16" cy="12" r="1.8" fill="var(--accent)" />
     </svg>
-    Image to 3D
+    <span>FACET</span>
   </a>
 
   <ol class="flow" aria-label="Progress">
@@ -27,22 +28,32 @@
   @switch (view()) {
     <!-- 1. No image yet -->
     @case ('empty') {
-      <section class="intro">
-        <h1>Turn one photo<br />into a <em>3D model.</em></h1>
-        <p>Upload a picture of an object. A few minutes later you can turn it around in your browser and download it as a GLB file.</p>
-      </section>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="kicker mono">Single-image 3D reconstruction</p>
+          <h1>Photo in.<br /><span class="accent">Mesh out.</span></h1>
+          <p class="lede">Drop a picture of an object. Facet generates new views of it, reconstructs the surface and hands you a textured GLB, in a few minutes.</p>
 
-      <button type="button" class="stage drop" [class.dragging]="dragging()" (click)="browse()">
-        <span class="drop-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M12 15V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-        </span>
-        <span class="drop-title">
-          @if (dragging()) { Release to upload } @else {
-            <span class="on-pointer">Drop a photo anywhere</span><span class="on-touch">Choose a photo</span>
-          }
-        </span>
-        <span class="drop-sub"><span class="on-pointer">or <span class="fake-link">choose a file</span><br /></span>PNG, JPEG or WebP, up to 10 MB</span>
-      </button>
+          <button type="button" class="drop vf" [class.dragging]="dragging()" (click)="browse()">
+            <span class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 15V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            </span>
+            <span class="drop-text">
+              <span class="drop-title">
+                @if (dragging()) { Release to upload } @else {
+                  <span class="on-pointer">Drop a photo, or click to browse</span><span class="on-touch">Choose a photo</span>
+                }
+              </span>
+              <span class="drop-sub mono">PNG · JPEG · WEBP — max 10 MB</span>
+            </span>
+          </button>
+        </div>
+        <div class="hero-visual">
+          <app-point-cloud />
+          <span class="axis-label mono tl">pts 2,600</span>
+          <span class="axis-label mono br">y ↑ · x →</span>
+        </div>
+      </section>
 
       @if (phase(); as p) {
         @if (p.kind === 'error') {
@@ -51,9 +62,9 @@
       }
 
       <ul class="tips">
-        <li><strong>One object</strong><span>A single thing, fully in frame. Not a scene or a group.</span></li>
-        <li><strong>Plain background</strong><span>We cut the object out, and a clean backdrop helps.</span></li>
-        <li><strong>Even light</strong><span>Soft light and a three-quarter angle show the most shape.</span></li>
+        <li><span class="mono">01</span><strong>One object</strong><span>A single thing, fully in frame. Not a scene or a group.</span></li>
+        <li><span class="mono">02</span><strong>Plain background</strong><span>The subject is cut out automatically; a clean backdrop helps.</span></li>
+        <li><span class="mono">03</span><strong>Even light</strong><span>Soft light and a three-quarter angle reveal the most shape.</span></li>
       </ul>
     }
 
@@ -69,17 +80,17 @@
     @case ('done') {
       @let d = phase();
       @if (d.kind === 'done') {
-        <section class="stage result" [class.dark]="darkStage()">
+        <section class="stage result" [class.no-grid]="!showGrid()">
           <app-model-viewer [src]="d.modelUrl" [alt]="'3D model made from ' + baseName()" [autoRotate]="autoRotate()" />
           @if (preview(); as src) {
-            <figure class="pip"><img [src]="src" alt="Original photo" /><figcaption>Original</figcaption></figure>
+            <figure class="pip vf"><img [src]="src" alt="Original photo" /><figcaption class="mono">Source</figcaption></figure>
           }
           <div class="viewer-tools">
             <button type="button" [class.on]="autoRotate()" (click)="autoRotate.set(!autoRotate())" [attr.aria-pressed]="autoRotate()">
               Turntable
             </button>
-            <button type="button" [class.on]="darkStage()" (click)="darkStage.set(!darkStage())" [attr.aria-pressed]="darkStage()">
-              Dark backdrop
+            <button type="button" [class.on]="showGrid()" (click)="showGrid.set(!showGrid())" [attr.aria-pressed]="showGrid()">
+              Floor grid
             </button>
           </div>
           <p class="viewer-hint">Drag to rotate · scroll to zoom</p>
@@ -98,7 +109,7 @@
             </a>
           </div>
         </section>
-        <p class="footnote">GLB opens in Blender, Windows 3D Viewer, Unity, Unreal and most 3D tools.</p>
+        <p class="footnote mono">GLB · opens in Blender, Unity, Unreal, Windows 3D Viewer and most 3D tools</p>
       }
     }
   }
@@ -107,9 +118,13 @@
 <ng-template #workspace>
   @let p = phase();
   <section class="stage split">
-    <figure class="print" [class.scanning]="busy()">
-      @if (preview(); as src) {
-        <img [src]="src" alt="Your photo" />
+    <figure class="print" [class.scanning]="busy() && !viewsUrl()">
+      @if (viewsUrl(); as views) {
+        <img class="views" [src]="views" alt="Six generated views of your object" />
+        <span class="print-tag mono">6 synthesized views</span>
+      } @else if (preview(); as src) {
+        <img [src]="src" alt="Your photo" class="vf-img" />
+        <span class="print-tag mono">{{ busy() ? 'Input · analyzing' : 'Input' }}</span>
       } @else {
         <div class="print-empty">Resumed job</div>
       }
@@ -121,12 +136,12 @@
 
     <div class="panel">
       @if (view() === 'ready') {
-        <h2 class="panel-title">Ready when you are.</h2>
+        <h2 class="panel-title">Reconstruction settings</h2>
 
         <label class="option">
           <span class="option-text">
             <span class="option-name">Remove background</span>
-            <span class="option-note">Keep this on unless your photo is already cut out.</span>
+            <span class="option-note">Leave on unless the photo is already cut out.</span>
           </span>
           <span class="switch">
             <input type="checkbox" [checked]="removeBg()" (change)="removeBg.set($any($event.target).checked)" />

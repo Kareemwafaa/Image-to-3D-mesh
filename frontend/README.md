@@ -1,4 +1,4 @@
-# Image to 3D: frontend
+# Facet (Image to 3D): frontend
 
 Angular app for the Image-to-3D platform: upload an image, watch the job's
 progress, view the generated mesh in 3D and download it as `.glb`.

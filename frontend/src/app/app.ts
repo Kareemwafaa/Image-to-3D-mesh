@@ -1,6 +1,7 @@
 import { Component, computed, ElementRef, HostListener, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
 import { ApiError, ApiService, JobStatus } from './api.service';
 import { ModelViewer } from './model-viewer';
+import { PointCloud } from './point-cloud';
 import { NgTemplateOutlet } from '@angular/common';
 
 const POLL_MS = 2500;
@@ -15,7 +16,14 @@ const MAX_BYTES = 10 * 1024 * 1024;
 type Phase =
   | { kind: 'idle' }
   | { kind: 'uploading' }
-  | { kind: 'processing'; jobId: string; status: JobStatus; progress: number | null; stage: string | null }
+  | {
+      kind: 'processing';
+      jobId: string;
+      status: JobStatus;
+      progress: number | null;
+      stage: string | null;
+      viewsUrl: string | null;
+    }
   | { kind: 'fetching'; jobId: string }
   | { kind: 'done'; jobId: string; modelUrl: string; size: number; seconds: number }
   | { kind: 'error'; message: string; jobId?: string };
@@ -35,7 +43,7 @@ type StepKey = (typeof PIPELINE)[number]['key'];
 
 @Component({
   selector: 'app-root',
-  imports: [ModelViewer, NgTemplateOutlet],
+  imports: [ModelViewer, NgTemplateOutlet, PointCloud],
   templateUrl: './app.html',
 })
 export class App implements OnInit, OnDestroy {
@@ -62,7 +70,7 @@ export class App implements OnInit, OnDestroy {
   );
   /** Viewer preferences on the result screen. */
   protected readonly autoRotate = signal(true);
-  protected readonly darkStage = signal(false);
+  protected readonly showGrid = signal(true);
   /** Which screen of the flow is showing. */
   protected readonly view = computed<'empty' | 'ready' | 'working' | 'done'>(() => {
     const k = this.phase().kind;
@@ -93,8 +101,15 @@ export class App implements OnInit, OnDestroy {
     if (p.kind === 'fetching') return 'export';
     if (p.kind !== 'processing') return null;
     if (p.status === 'queued') return 'queue';
-    const known = this.steps().find((s) => s.key === p.stage);
+    // Backend stages that belong to a broader step in the UI.
+    const alias: Record<string, StepKey> = { segmenting_views: 'multiview', done: 'meshing' };
+    const stage = p.stage ? (alias[p.stage] ?? p.stage) : null;
+    const known = this.steps().find((s) => s.key === stage);
     return known ? known.key : this.segmentStep() ? 'segmenting' : 'multiview';
+  });
+  protected readonly viewsUrl = computed(() => {
+    const p = this.phase();
+    return p.kind === 'processing' ? p.viewsUrl : null;
   });
   protected readonly currentStepLabel = computed(() => this.steps()[this.stepIndex()]?.label ?? '');
   /** Index into steps() of the step currently running. */
@@ -213,7 +228,7 @@ export class App implements OnInit, OnDestroy {
       }
       this.jobId = jobId;
       setJobInUrl(jobId);
-      this.setPhase({ kind: 'processing', jobId, status: 'queued', progress: null, stage: null });
+      this.setPhase({ kind: 'processing', jobId, status: 'queued', progress: null, stage: null, viewsUrl: null });
 
       let failures = 0;
       for (;;) {
@@ -248,7 +263,14 @@ export class App implements OnInit, OnDestroy {
           }
           return;
         }
-        this.setPhase({ kind: 'processing', jobId, status: job.status, progress: job.progress, stage: job.stage });
+        this.setPhase({
+          kind: 'processing',
+          jobId,
+          status: job.status,
+          progress: job.progress,
+          stage: job.stage,
+          viewsUrl: job.viewsUrl,
+        });
         await sleep(POLL_MS, signal);
       }
     } catch (err) {
