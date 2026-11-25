@@ -1,7 +1,7 @@
 """Default backend: Zero123++ multi-view diffusion + NeuS reconstruction.
 
-    segmented image --(Zero123++)--> 6 views --(U^2-Net)--> 6 masks
-        --(NeuS fit, known cameras)--> SDF --(marching cubes)--> .glb
+segmented image --(Zero123++)--> 6 views --(U^2-Net)--> 6 masks
+    --(NeuS fit, known cameras)--> SDF --(marching cubes)--> .glb
 """
 
 from __future__ import annotations
@@ -69,5 +69,8 @@ class MultiViewNeuSBackend:
         mesh.export(out_dir / "result.glb", file_type="glb")
         log.info(
             "multiview %.1fs, reconstruction %.1fs, meshing %.1fs, %d faces",
-            t1 - t0, t2 - t1, time.monotonic() - t2, len(mesh.faces),
+            t1 - t0,
+            t2 - t1,
+            time.monotonic() - t2,
+            len(mesh.faces),
         )

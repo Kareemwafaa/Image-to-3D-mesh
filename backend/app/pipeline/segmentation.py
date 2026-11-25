@@ -13,12 +13,10 @@ import threading
 import numpy as np
 from PIL import Image
 
+from .errors import PreprocessError
+
 _session = None
 _session_lock = threading.Lock()
-
-
-class PreprocessError(Exception):
-    pass
 
 
 def _rembg_session():

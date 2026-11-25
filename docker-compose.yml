@@ -1,0 +1,142 @@
+# Full stack on one machine.
+#
+#   docker compose --profile cpu up --build            # mock model, any laptop
+#   docker compose --profile gpu up --build            # real pipeline, NVIDIA GPU
+#   docker compose --profile cpu --profile observability up --build
+#       + Prometheus :9090, Grafana :3001 (admin/admin), Jaeger :16686
+#       (set OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 to send traces)
+#   docker compose --profile cpu up --scale worker-cpu=3   # more workers
+#
+# API: http://localhost:8000/docs   S3 (SeaweedFS): http://localhost:8333
+
+x-backend-env: &backend-env
+  MODE: full
+  DATABASE_URL: postgresql+asyncpg://i3d:i3d@postgres:5432/i3d
+  REDIS_URL: redis://redis:6379/0
+  STORAGE_BACKEND: s3
+  S3_ENDPOINT_URL: http://s3:8333
+  S3_BUCKET: image-to-3d
+  # Must match deploy/seaweedfs/s3.json. Any S3 works: point these at AWS, R2 or MinIO.
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-i3d-access-key}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-i3d-secret-key-change-me}
+  ADMIN_API_KEY: ${ADMIN_API_KEY:-i3d_00000000_dev-admin-key-change-me}
+  AUTH_MODE: ${AUTH_MODE:-optional}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:4200}
+  LOG_JSON: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+x-worker: &worker
+  restart: unless-stopped
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    redis: { condition: service_healthy }
+    s3: { condition: service_healthy }
+  stop_grace_period: 60s  # let the current job finish on SIGTERM
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: i3d
+      POSTGRES_PASSWORD: i3d
+      POSTGRES_DB: i3d
+    ports: ["127.0.0.1:5432:5432"]  # for `pytest -m integration` and psql from the host
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U i3d -d i3d"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  # S3-compatible object storage. MinIO no longer publishes community images,
+  # so local runs use SeaweedFS; the code only speaks S3 (ADR 0009).
+  s3:
+    image: chrislusf/seaweedfs:4.50
+    # volume.max=0 sizes the volume count from free disk; small volumes keep it high.
+    command: ["server", "-dir=/data", "-volume.max=0", "-master.volumeSizeLimitMB=1024",
+              "-s3", "-s3.config=/etc/seaweedfs/s3.json"]
+    ports: ["8333:8333"]
+    volumes:
+      - s3data:/data
+      - ./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8333/healthz"]
+      interval: 5s
+      retries: 30
+
+  migrate:
+    build: { context: ./backend, target: api }
+    command: ["python", "-m", "app.db.migrate"]
+    environment: *backend-env
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    build: { context: ./backend, target: api }
+    restart: unless-stopped
+    environment: *backend-env
+    ports: ["8000:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      s3: { condition: service_healthy }
+
+  worker-cpu:
+    <<: *worker
+    profiles: [cpu]
+    build: { context: ./backend, target: worker-cpu }
+    environment:
+      <<: *backend-env
+      MODEL_BACKEND: mock
+
+  worker-gpu:
+    <<: *worker
+    profiles: [gpu]
+    build: { context: ./backend, target: worker-gpu }
+    environment:
+      <<: *backend-env
+      MODEL_BACKEND: multiview
+      JOB_TIMEOUT_S: "900"
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: [observability]
+    volumes: [./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro]
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    profiles: [observability]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    profiles: [observability]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686"]
+
+volumes:
+  pgdata:
+  redisdata:
+  s3data:

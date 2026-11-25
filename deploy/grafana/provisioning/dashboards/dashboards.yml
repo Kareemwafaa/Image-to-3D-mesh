@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: image-to-3d
+    folder: Image to 3D
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
