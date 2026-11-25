@@ -85,11 +85,45 @@ button { font: inherit; color: inherit; }
 .flow li.past .flow-num { border-color: var(--text-3); color: var(--text-2); }
 .flow li.on { color: var(--text); background: var(--surface-2); }
 .flow li.on .flow-num { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.server { justify-self: end; display: inline-flex; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.server { justify-self: end; display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; margin: -6px -10px; background: none; border: 1px solid transparent; border-radius: 999px; cursor: pointer; font: 12px var(--mono); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.server:hover { border-color: var(--line-2); color: var(--text-2); }
 .server .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
 .server[data-state='online'] .dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim), 0 0 10px var(--accent); }
 .server[data-state='offline'] { color: var(--bad); }
 .server[data-state='offline'] .dot { background: var(--bad); }
+
+/* Server dialog: pick which backend this page talks to. */
+.server-dialog { width: min(520px, calc(100vw - 32px)); padding: 0; background: var(--surface); color: var(--text); border: 1px solid var(--line-2); border-radius: var(--r); box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.7); }
+.server-dialog::backdrop { background: rgb(5 7 10 / 0.7); backdrop-filter: blur(3px); }
+.server-dialog form { padding: 28px; display: flex; flex-direction: column; gap: 14px; }
+.server-dialog h2 { margin: 0; font-size: 20px; font-stretch: 112%; }
+.dialog-note, .dialog-foot { margin: 0; color: var(--text-2); font-size: 14px; }
+.dialog-foot { font-size: 13px; color: var(--text-3); padding-top: 12px; border-top: 1px solid var(--line); }
+.dialog-foot a { color: var(--text-2); }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field input { height: 46px; padding: 0 14px; background: var(--bg-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 10px; font: 14px var(--mono); min-width: 0; }
+.field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.dialog-status { margin: 0; min-height: 1.5em; color: var(--text-3); overflow-wrap: anywhere; }
+.dialog-status[data-state='ok'] { color: var(--ok); }
+.dialog-status[data-state='fail'], .dialog-status[data-state='invalid'] { color: var(--bad); }
+.dialog-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.dialog-actions .spacer { flex: 1; }
+.btn:disabled { opacity: 0.6; cursor: progress; }
+
+/* Shown on the landing page when no backend answers. */
+.offline-note { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px 16px; margin: 0 0 32px; padding: 16px 20px; background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r); }
+.offline-note p { margin: 0; color: var(--text-2); font-size: 14px; }
+.offline-note strong { color: var(--text); margin-right: 4px; }
+.offline-note .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 4px rgb(255 107 107 / 0.15); }
+.offline-actions { display: flex; align-items: center; gap: 12px; }
+@media (max-width: 480px) {
+  .dialog-actions .spacer { display: none; }
+  .dialog-actions .btn:not(.link) { flex: 1 1 40%; }
+}
+@media (max-width: 720px) {
+  .offline-note { grid-template-columns: auto 1fr; }
+  .offline-actions { grid-column: 1 / -1; }
+}
 
 /* ---------- Page ---------- */
 .page { max-width: 1200px; margin: 0 auto; padding: 8px 24px 80px; }
@@ -102,11 +136,15 @@ button { font: inherit; color: inherit; }
 .lede { margin: 0 0 32px; max-width: 480px; font-size: 17px; color: var(--text-2); }
 .hero-visual { position: relative; aspect-ratio: 1; max-height: 520px; justify-self: center; width: 100%; }
 .point-cloud, .point-cloud canvas { display: block; width: 100%; height: 100%; }
+/* Drag to spin in any direction. On touch screens a drag that starts on the
+   vase turns it; the page still scrolls from anywhere else. */
+.point-cloud canvas { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.point-cloud canvas.dragging { cursor: grabbing; }
 .hero-visual::before {
-  content: ''; position: absolute; inset: 12% 12% 4%; border-radius: 50%;
+  content: ''; position: absolute; inset: 12% 12% 4%; border-radius: 50%; pointer-events: none;
   background: radial-gradient(closest-side, rgb(200 245 96 / 0.08), transparent);
 }
-.axis-label { position: absolute; color: var(--text-3); font-size: 11px; }
+.axis-label { position: absolute; color: var(--text-3); font-size: 11px; pointer-events: none; }
 .axis-label.tl { top: 8%; left: 6%; }
 .axis-label.br { bottom: 6%; right: 6%; }
 
