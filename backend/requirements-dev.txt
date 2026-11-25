@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest>=8
+httpx>=0.27
+modal>=1.0
+# for the pipeline tests (CPU wheels are fine):
+torch>=2.4
