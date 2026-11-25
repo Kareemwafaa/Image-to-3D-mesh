@@ -19,7 +19,7 @@ type Quat = [number, number, number, number]; // w, x, y, z
 type Vec3 = [number, number, number];
 
 const IDLE_SPIN = 1 / 7000; // rad per ms, the turntable speed
-const BASE_PITCH = 0.32; // resting camera tilt, rad
+const BASE_PITCH = -0.32; // resting camera tilt, rad (negative: looking slightly down)
 const START_YAW = 0.6;
 const DRAG_RAD_PER_PX = 0.009;
 const MAX_FLING = 0.012; // rad per ms, caps a hard fling
@@ -311,7 +311,7 @@ function vasePoints(n: number): [number, number, number][] {
     const radius = 0.34 + 0.3 * Math.sin(Math.PI * Math.min(1, v * 1.25)) - 0.16 * Math.exp(-((v - 0.82) ** 2) / 0.004) + 0.05 * Math.exp(-((v - 0.97) ** 2) / 0.0006);
     const theta = i * golden;
     const j = 1 + (Math.random() - 0.5) * 0.03;
-    out.push([Math.cos(theta) * radius * j, -y * 0.95, Math.sin(theta) * radius * j]);
+    out.push([Math.cos(theta) * radius * j, y * 0.95, Math.sin(theta) * radius * j]); // y down the screen: neck on top
   }
   return out;
 }
