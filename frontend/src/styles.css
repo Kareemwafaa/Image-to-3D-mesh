@@ -136,11 +136,14 @@ button { font: inherit; color: inherit; }
 .lede { margin: 0 0 32px; max-width: 480px; font-size: 17px; color: var(--text-2); }
 .hero-visual { position: relative; aspect-ratio: 1; max-height: 520px; justify-self: center; width: 100%; }
 .point-cloud, .point-cloud canvas { display: block; width: 100%; height: 100%; }
+/* Drag to spin. pan-y keeps vertical page scrolling working on touch screens. */
+.point-cloud canvas { cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.point-cloud canvas.dragging { cursor: grabbing; }
 .hero-visual::before {
-  content: ''; position: absolute; inset: 12% 12% 4%; border-radius: 50%;
+  content: ''; position: absolute; inset: 12% 12% 4%; border-radius: 50%; pointer-events: none;
   background: radial-gradient(closest-side, rgb(200 245 96 / 0.08), transparent);
 }
-.axis-label { position: absolute; color: var(--text-3); font-size: 11px; }
+.axis-label { position: absolute; color: var(--text-3); font-size: 11px; pointer-events: none; }
 .axis-label.tl { top: 8%; left: 6%; }
 .axis-label.br { bottom: 6%; right: 6%; }
 
