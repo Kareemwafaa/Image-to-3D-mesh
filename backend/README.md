@@ -251,7 +251,7 @@ pytest            # ~1-2 min; the NeuS test trains a tiny model on CPU
 The easiest way to run the real pipeline. The notebook in
 [`notebooks/facet_backend.ipynb`](../notebooks/facet_backend.ipynb) installs a pinned environment
 (`scripts/setup_gpu_env.sh`), starts the API on the free T4 and exposes it through a Cloudflare quick
-tunnel (`scripts/serve_public.py`). Step by step: [docs/run-on-a-free-gpu.md](../docs/run-on-a-free-gpu.md).
+tunnel (`scripts/serve_public.py`).
 
 ### Deploy on Modal (optional)
 
