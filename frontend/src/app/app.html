@@ -1,0 +1,100 @@
+<main class="container">
+  <header>
+    <h1>Image to 3D</h1>
+    <p class="muted">Turn a single photo of an object into a 3D mesh you can download as .glb.</p>
+  </header>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>1. Upload an image</h2>
+      <label
+        class="dropzone"
+        [class.dragging]="dragging()"
+        [class.disabled]="busy()"
+        (dragover)="onDragOver($event)"
+        (dragleave)="dragging.set(false)"
+        (drop)="onDrop($event)"
+      >
+        <input #fileInput type="file" [accept]="accept" [disabled]="busy()" (change)="onFileChange($event)" />
+        @if (preview(); as src) {
+          <img [src]="src" alt="Selected image" class="preview" />
+        } @else {
+          <span class="hint">
+            <span>Drop an image here or <u>browse</u></span>
+            <small>PNG, JPEG or WebP, up to 10 MB. One object on a plain background works best.</small>
+          </span>
+        }
+      </label>
+
+      <label class="check">
+        <input
+          type="checkbox"
+          [checked]="removeBg()"
+          [disabled]="busy()"
+          (change)="removeBg.set($any($event.target).checked)"
+        />
+        Remove background before generating
+      </label>
+
+      <div class="actions">
+        <button class="primary" (click)="generate()" [disabled]="!file() || busy()">
+          {{ busy() ? 'Generating…' : 'Generate 3D mesh' }}
+        </button>
+        @if (file() || phase().kind !== 'idle') {
+          <button (click)="reset()">{{ busy() ? 'Cancel' : 'Start over' }}</button>
+        }
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>2. Your mesh</h2>
+      @let p = phase();
+      @switch (p.kind) {
+        @case ('idle') {
+          <div class="viewer placeholder">The 3D model will appear here.</div>
+        }
+        @case ('error') {
+          @if (p.kind === 'error') {
+            <div class="viewer placeholder error" role="alert">{{ p.message }}</div>
+          }
+        }
+        @case ('done') {
+          @if (p.kind === 'done') {
+            <app-model-viewer [src]="p.modelUrl" [alt]="'3D mesh generated from ' + baseName()" />
+            <div class="actions">
+              <a class="button primary" [href]="p.modelUrl" [attr.download]="baseName() + '.glb'">
+                Download .glb ({{ formatBytes(p.size) }})
+              </a>
+              <span class="muted">Drag to rotate, scroll to zoom.</span>
+            </div>
+          }
+        }
+        @default {
+          <div class="viewer placeholder" aria-live="polite">
+            <div class="progress-wrap">
+              <div class="progress-label">
+                <span>{{ progressLabel() }}</span>
+                <span class="muted">
+                  @if (percent() !== null) {
+                    {{ percent() }}% ·
+                  }
+                  {{ elapsed() }}s
+                </span>
+              </div>
+              <div
+                class="progress"
+                [class.indeterminate]="percent() === null"
+                role="progressbar"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                [attr.aria-valuenow]="percent()"
+              >
+                <div [style.width.%]="percent()"></div>
+              </div>
+            </div>
+          </div>
+        }
+      }
+    </section>
+  </div>
+</main>
