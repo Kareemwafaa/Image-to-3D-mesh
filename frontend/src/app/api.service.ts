@@ -18,6 +18,8 @@ export interface Job {
   /** Pipeline stage while running: segmenting, multiview, reconstructing, meshing. */
   stage: string | null;
   resultUrl: string | null;
+  /** PNG grid of the generated views, available once multi-view diffusion finishes. */
+  viewsUrl: string | null;
   error: string | null;
   createdAt: number | null;
 }
@@ -86,16 +88,20 @@ export class ApiService {
       progress: typeof raw.progress === 'number' ? raw.progress : null,
       stage: typeof raw.stage === 'string' ? raw.stage.toLowerCase() : null,
       resultUrl: raw.result_url ?? null,
+      viewsUrl: raw.views_url ? await this.absolute(raw.views_url) : null,
       error: raw.error ?? null,
       createdAt: parseTime(raw.created_at),
     };
   }
 
+  private async absolute(path: string): Promise<string> {
+    if (/^https?:\/\//.test(path)) return path;
+    return `${await this.apiUrl()}${path.startsWith('/') ? '' : '/'}${path}`;
+  }
+
   /** Downloads the finished mesh as a Blob. */
   async fetchResult(job: Job, signal?: AbortSignal): Promise<Blob> {
-    const base = await this.apiUrl();
-    const path = job.resultUrl ?? `/jobs/${encodeURIComponent(job.jobId)}/result`;
-    const url = /^https?:\/\//.test(path) ? path : `${base}${path.startsWith('/') ? '' : '/'}${path}`;
+    const url = await this.absolute(job.resultUrl ?? `/jobs/${encodeURIComponent(job.jobId)}/result`);
     const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`Could not load the mesh (${res.status}).`);
     return new Blob([await res.blob()], { type: 'model/gltf-binary' });
