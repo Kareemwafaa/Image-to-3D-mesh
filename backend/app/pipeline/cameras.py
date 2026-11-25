@@ -82,5 +82,5 @@ def zero123pp_cameras(size: int = 320, radius: float = ZERO123PP_RADIUS) -> list
     """The six output cameras of Zero123++ v1.2, in the order of its 3x2 output grid."""
     return [
         orbit_camera(az, el, radius, ZERO123PP_FOV_DEG, size)
-        for az, el in zip(ZERO123PP_AZIMUTHS, ZERO123PP_ELEVATIONS)
+        for az, el in zip(ZERO123PP_AZIMUTHS, ZERO123PP_ELEVATIONS, strict=True)
     ]

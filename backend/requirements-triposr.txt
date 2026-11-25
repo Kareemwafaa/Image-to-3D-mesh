@@ -1,6 +1,0 @@
-# Optional feed-forward baseline (MODEL_BACKEND=triposr). Install AFTER torch,
-# with --no-build-isolation (torchmcubes compiles against the installed torch).
-# TripoSR itself is not on PyPI: clone it and put it on PYTHONPATH (see Dockerfile).
-omegaconf==2.3.0
-einops==0.7.0
-git+https://github.com/tatsy/torchmcubes.git

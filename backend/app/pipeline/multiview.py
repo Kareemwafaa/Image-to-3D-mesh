@@ -29,11 +29,7 @@ def split_grid(grid: Image.Image) -> list[Image.Image]:
     """Cut Zero123++'s 3x2 canvas into six views, row-major (matches cameras.zero123pp_cameras)."""
     w, h = grid.size
     vw, vh = w // GRID_COLS, h // GRID_ROWS
-    return [
-        grid.crop((c * vw, r * vh, (c + 1) * vw, (r + 1) * vh))
-        for r in range(GRID_ROWS)
-        for c in range(GRID_COLS)
-    ]
+    return [grid.crop((c * vw, r * vh, (c + 1) * vw, (r + 1) * vh)) for r in range(GRID_ROWS) for c in range(GRID_COLS)]
 
 
 def make_grid(views: list[Image.Image]) -> Image.Image:
@@ -65,13 +61,9 @@ class Zero123PlusGenerator:
 
         dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
         log.info("Loading %s on %s (%s)", self.model_id, self.device, dtype)
-        pipe = DiffusionPipeline.from_pretrained(
-            self.model_id, custom_pipeline=self.pipeline_id, torch_dtype=dtype
-        )
+        pipe = DiffusionPipeline.from_pretrained(self.model_id, custom_pipeline=self.pipeline_id, torch_dtype=dtype)
         # Settings recommended by the Zero123++ authors.
-        pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(
-            pipe.scheduler.config, timestep_spacing="trailing"
-        )
+        pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing")
         pipe.to(self.device)
         pipe.set_progress_bar_config(disable=True)
         self.pipe = pipe
