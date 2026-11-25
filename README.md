@@ -6,13 +6,10 @@
 A two-stage generative reconstruction pipeline (multi-view diffusion, then a neural signed distance field)
 served by a production-style API, with a web app to drive it.
 
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Kareemwafaa/Image-to-3D-mesh/blob/main/notebooks/facet_backend.ipynb)
-[![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://kaggle.com/kernels/welcome?src=https://github.com/Kareemwafaa/Image-to-3D-mesh/blob/main/notebooks/facet_backend.ipynb)
 [![Web app](https://img.shields.io/badge/web%20app-GitHub%20Pages-c8f560?labelColor=0b0e12)](https://kareemwafaa.github.io/Image-to-3D-mesh/)
-[![License: MIT](https://img.shields.io/badge/code-MIT-blue)](LICENSE)
 
-<!-- DEMO VIDEO: record one with docs/recording-a-demo.md, save it as docs/media/demo.gif
-     (or drag an .mp4 into a GitHub comment and paste the link here), then replace the image below. -->
+<!-- DEMO VIDEO: save a short recording as docs/media/demo.gif (or drag an .mp4 into a
+     GitHub comment and paste the link here), then replace the image below. -->
 <img src="docs/media/facet-landing.png" alt="The Facet web app: drop a photo to generate a 3D model" width="860">
 
 </div>
@@ -70,8 +67,7 @@ diagram and the design decisions (ADRs). For free notebook GPUs it also runs in 
 ## Results
 
 > The pipeline has been verified end to end on CPU with synthetic scenes (see `backend/tests/`).
-> GPU results go here after the first runs on a T4. To fill this in, see
-> [docs/recording-a-demo.md](docs/recording-a-demo.md#4-measure-for-the-results-table).
+> GPU results go here after the first runs on a T4.
 
 | Input | Six generated views | Mesh | Time on a T4 |
 | --- | --- | --- | --- |
@@ -82,16 +78,12 @@ diagram and the design decisions (ADRs). For free notebook GPUs it also runs in 
 The models need an NVIDIA GPU with roughly 12 GB of memory or more (the free T4 has 15 GB).
 Pick one of three ways.
 
-### 1. Free GPU in the browser: Colab or Kaggle (recommended)
+### 1. Free GPU on Colab or Kaggle
 
-No install and no credit card. Click a badge, switch on the GPU, *Run all*:
-
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Kareemwafaa/Image-to-3D-mesh/blob/main/notebooks/facet_backend.ipynb)
-[![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://kaggle.com/kernels/welcome?src=https://github.com/Kareemwafaa/Image-to-3D-mesh/blob/main/notebooks/facet_backend.ipynb)
-
-The notebook installs the backend, starts it on the free T4 GPU, opens a free Cloudflare tunnel and
-prints a link to the web app that is already connected to your GPU. Step-by-step instructions, written
-for first-timers: [docs/run-on-a-free-gpu.md](docs/run-on-a-free-gpu.md).
+Open [`notebooks/facet_backend.ipynb`](notebooks/facet_backend.ipynb) in Google Colab or Kaggle,
+switch on the T4 GPU (on Kaggle also switch *Internet* on), and *Run all*. The notebook installs the
+backend, starts it on the GPU, opens a free Cloudflare tunnel and prints a link to the web app that
+is already connected to your GPU.
 
 ### 2. Your own NVIDIA GPU (Linux or WSL)
 
@@ -118,8 +110,7 @@ The frontend (Angular, in [`frontend/`](frontend/)) is a static site hosted on G
 - click **Server** in the top-right corner and paste the backend URL, or
 - add `?api=<backend URL>` to the page address (this is what the notebook's link does).
 
-The choice is remembered in your browser. To host your own copy, see
-[docs/deploy-frontend.md](docs/deploy-frontend.md).
+The choice is remembered in your browser.
 
 ## Repository layout
 
@@ -129,21 +120,7 @@ The choice is remembered in your browser. To host your own copy, see
 | [`frontend/`](frontend/) | Facet, the Angular web app |
 | [`notebooks/`](notebooks/) | Colab and Kaggle notebook for free GPUs |
 | [`scripts/`](scripts/) | `setup_gpu_env.sh` (pinned environment) and `serve_public.py` (server + tunnel) |
-| [`docs/`](docs/) | Guides: free GPU, frontend hosting, recording a demo; architecture |
-
-## Licence
-
-The code in this repository is released under the [MIT licence](LICENSE).
-
-The pretrained models it downloads have their own licences:
-
-| Model | Used for | Licence |
-| --- | --- | --- |
-| [Zero123++ v1.2](https://huggingface.co/sudo-ai/zero123plus-v1.2) | multi-view diffusion | weights **CC BY-NC 4.0** (non-commercial), code Apache 2.0 |
-| [U²-Net](https://github.com/xuebinqin/U-2-Net) via [rembg](https://github.com/danielgatis/rembg) | background removal | Apache 2.0 (rembg: MIT) |
-
-Because of the Zero123++ weights, **the default pipeline may not be used in a commercial product**.
-The meshes you generate are yours to use, per the Zero123++ authors.
+| [`docs/`](docs/) | Architecture and screenshots |
 
 ## References
 

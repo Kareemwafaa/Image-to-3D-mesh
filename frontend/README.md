@@ -51,4 +51,4 @@ Jobs take a few minutes, so the running job's id is kept in the address bar
 ## Deploy
 
 Pushed to GitHub Pages by `.github/workflows/pages.yml` on every change to `frontend/` on `main`.
-See [docs/deploy-frontend.md](../docs/deploy-frontend.md) (GitHub Pages one-time setup, or Vercel).
+One-time setup: repo Settings → Pages → Source: "GitHub Actions".
