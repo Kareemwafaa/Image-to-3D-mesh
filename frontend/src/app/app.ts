@@ -1,5 +1,5 @@
 import { Component, computed, ElementRef, HostListener, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
-import { ApiError, ApiService, JobStatus } from './api.service';
+import { ApiError, ApiService, JobStatus, normalizeApiUrl } from './api.service';
 import { ModelViewer } from './model-viewer';
 import { PointCloud } from './point-cloud';
 import { NgTemplateOutlet } from '@angular/common';
@@ -50,6 +50,7 @@ export class App implements OnInit, OnDestroy {
   private readonly api = inject(ApiService);
   private readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
   private readonly stage = viewChild<ElementRef<HTMLElement>>('stage');
+  private readonly serverDialog = viewChild<ElementRef<HTMLDialogElement>>('serverDialog');
   private abort?: AbortController;
   private timer?: ReturnType<typeof setInterval>;
   private healthTimer?: ReturnType<typeof setInterval>;
@@ -88,6 +89,11 @@ export class App implements OnInit, OnDestroy {
   protected readonly dragging = signal(false);
   protected readonly elapsed = signal(0);
   protected readonly apiOnline = signal<boolean | null>(null);
+  protected readonly apiUrl = this.api.baseUrl;
+  protected readonly apiSource = this.api.source;
+  /** "Server" dialog: the URL being typed and the result of testing it. */
+  protected readonly serverDraft = signal('');
+  protected readonly serverTest = signal<'idle' | 'testing' | 'ok' | 'fail' | 'invalid'>('idle');
 
   protected readonly busy = computed(() => {
     const k = this.phase().kind;
@@ -140,9 +146,8 @@ export class App implements OnInit, OnDestroy {
   });
 
   ngOnInit() {
-    const check = () => this.api.health().then((ok) => this.apiOnline.set(ok));
-    check();
-    this.healthTimer = setInterval(check, HEALTH_MS);
+    this.checkHealth();
+    this.healthTimer = setInterval(() => this.checkHealth(), HEALTH_MS);
 
     // A job id in the URL means a reload during a long job: pick it back up.
     const jobId = new URLSearchParams(location.search).get('job');
@@ -154,6 +159,61 @@ export class App implements OnInit, OnDestroy {
     clearInterval(this.healthTimer);
     this.setPreview(null);
     this.setPhase({ kind: 'idle' });
+  }
+
+  private async checkHealth() {
+    const url = this.apiUrl();
+    const ok = await this.api.health();
+    // Ignore an answer about a server the user has since switched away from.
+    if (url === null || url === this.apiUrl()) this.apiOnline.set(ok);
+  }
+
+  protected openServerDialog() {
+    this.serverDraft.set(this.apiSource() === 'custom' ? (this.apiUrl() ?? '') : '');
+    this.serverTest.set('idle');
+    this.serverDialog()?.nativeElement.showModal();
+  }
+
+  protected closeServerDialog() {
+    this.serverDialog()?.nativeElement.close();
+  }
+
+  /** Checks the typed URL, and switches to it if it answers. */
+  protected async connectServer(e?: Event) {
+    e?.preventDefault();
+    const url = normalizeApiUrl(this.serverDraft());
+    if (!url) {
+      this.serverTest.set('invalid');
+      return;
+    }
+    this.serverTest.set('testing');
+    const ok = await this.api.health(url);
+    if (!ok) {
+      this.serverTest.set('fail');
+      return;
+    }
+    this.serverTest.set('ok');
+    await this.useServer(url);
+    this.closeServerDialog();
+  }
+
+  /** Keep a URL that did not answer (it may still be starting up). */
+  protected async saveServerAnyway() {
+    const url = normalizeApiUrl(this.serverDraft());
+    if (!url) return;
+    await this.useServer(url);
+    this.closeServerDialog();
+  }
+
+  protected async useDefaultServer() {
+    await this.useServer(null);
+    this.closeServerDialog();
+  }
+
+  private async useServer(url: string | null) {
+    this.apiOnline.set(null);
+    await this.api.setBaseUrl(url);
+    await this.checkHealth();
   }
 
   protected onFileChange(e: Event) {
