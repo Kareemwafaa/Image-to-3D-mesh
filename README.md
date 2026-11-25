@@ -57,12 +57,31 @@ network) and references are in [backend/README.md](backend/README.md#the-theory-
 
 ## System architecture
 
-<!-- Owned by the backend work: API gateway, queue, GPU workers, storage, observability.
-     The diagram and design decisions live in docs/architecture/. -->
-The backend is built as a production-style service: an API gateway, a job queue, separate GPU
-workers, object storage and metrics. See [docs/architecture/](docs/architecture/) for the system
-diagram and the design decisions (ADRs). For free notebook GPUs it also runs in a single-process
-"lite" mode.
+The pipeline runs inside a production-style job system, built to show how a
+GPU service is put together, not just the model:
+
+- **Gateway and workers.** A stateless FastAPI gateway never touches a GPU; it
+  validates, rate-limits and enqueues. GPU workers pull jobs from a Redis
+  Streams consumer group, so adding GPUs means starting more workers.
+- **Reliability.** At-least-once delivery with idempotent consumers: leases
+  and reclaim when a worker dies, retries with exponential backoff, a
+  dead-letter queue with admin re-drive, per-job timeouts, and
+  `Idempotency-Key` on submit. Postgres is the source of truth.
+- **API.** Versioned REST, API keys, token-bucket rate limits, live progress
+  over Server-Sent Events, RFC 9457 errors.
+- **Observability.** Structured logs, Prometheus metrics with a provisioned
+  Grafana dashboard, and OpenTelemetry traces that follow a job from the HTTP
+  request, through the queue, into each GPU stage.
+- **Two run modes, one code base.** `docker compose up` runs the full stack
+  (Postgres, Redis, S3, workers, Prometheus, Grafana, Jaeger); `python -m app.lite`
+  runs it all in one process on a free notebook GPU.
+
+![One job traced across the gateway, the queue and a worker](docs/media/jaeger-trace.png)
+
+Diagrams, the failure-handling table and nine design decision records are in
+[docs/architecture/](docs/architecture/README.md). CI runs the unit tests,
+integration tests against real Postgres, Redis and S3, and a Docker Compose
+smoke test on every pull request.
 
 ## Results
 
@@ -116,11 +135,12 @@ The choice is remembered in your browser.
 
 | Path | What is there |
 | --- | --- |
-| [`backend/`](backend/) | FastAPI service and the reconstruction pipeline, one module per stage |
+| [`backend/`](backend/) | API gateway, job queue, workers and the reconstruction pipeline, one module per stage |
 | [`frontend/`](frontend/) | Facet, the Angular web app |
 | [`notebooks/`](notebooks/) | Colab and Kaggle notebook for free GPUs |
 | [`scripts/`](scripts/) | `setup_gpu_env.sh` (pinned environment) and `serve_public.py` (server + tunnel) |
-| [`docs/`](docs/) | Architecture and screenshots |
+| [`docs/`](docs/) | Architecture, design decisions (ADRs) and screenshots |
+| [`deploy/`](deploy/), `docker-compose.yml` | The full stack: Prometheus, Grafana and S3 config, smoke test |
 
 ## References
 
