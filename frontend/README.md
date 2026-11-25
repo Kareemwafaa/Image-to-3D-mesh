@@ -42,8 +42,8 @@ npx ng test --watch=false
 | `GET /health` every 30 s | server status dot in the top bar |
 | `GET /jobs/{job_id}/result` | the `.glb`, fetched once and reused for the viewer and the download |
 
-The landing page's point cloud is a small 2D-canvas renderer (`point-cloud.ts`): drag to spin it with
-inertia; with a mouse it leans toward the cursor and points near it light up. Reduced-motion users get
+The landing page's point cloud is a small 2D-canvas renderer (`point-cloud.ts`): drag in any direction to turn it
+all the way round (trackball), with inertia; with a mouse it leans toward the cursor and points near it light up. Reduced-motion users get
 a still image that only moves while dragged.
 
 The 3D viewer is Google's [`<model-viewer>`](https://modelviewer.dev), loaded lazily.
