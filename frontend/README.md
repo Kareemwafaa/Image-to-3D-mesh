@@ -23,7 +23,7 @@ runtime, first match wins:
    deployment's default. Editing it needs no rebuild.
 4. `http://localhost:8000`.
 
-When no backend answers, the landing page explains how to start one for free. The backend must allow
+When no backend answers, the landing page offers to connect one. The backend must allow
 this app's origin in `CORS_ORIGINS` (`*` is fine: the API uses no cookies).
 
 ## Build and test
@@ -41,6 +41,10 @@ npx ng test --watch=false
 | `GET /jobs/{job_id}` every 2.5 s | status, `progress` 0..1, optional `stage` (segmenting, multiview, reconstructing, meshing), `error`; up to 5 transient failures are retried |
 | `GET /health` every 30 s | server status dot in the top bar |
 | `GET /jobs/{job_id}/result` | the `.glb`, fetched once and reused for the viewer and the download |
+
+The landing page's point cloud is a small 2D-canvas renderer (`point-cloud.ts`): drag to spin it with
+inertia; with a mouse it leans toward the cursor and points near it light up. Reduced-motion users get
+a still image that only moves while dragged.
 
 The 3D viewer is Google's [`<model-viewer>`](https://modelviewer.dev), loaded lazily.
 Client-side limits (PNG/JPEG/WebP, 10 MB) are a guess; the backend has the final say.

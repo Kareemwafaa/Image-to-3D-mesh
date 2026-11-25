@@ -12,8 +12,6 @@ const HEALTH_MS = 30000;
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp'];
 // Client-side guard only; the backend enforces its own limit (413).
 const MAX_BYTES = 10 * 1024 * 1024;
-/** Where visitors learn to start their own free GPU backend. */
-export const RUN_YOUR_OWN_URL = 'https://github.com/Kareemwafaa/Image-to-3D-mesh#run-it';
 
 type Phase =
   | { kind: 'idle' }
@@ -93,7 +91,6 @@ export class App implements OnInit, OnDestroy {
   protected readonly apiOnline = signal<boolean | null>(null);
   protected readonly apiUrl = this.api.baseUrl;
   protected readonly apiSource = this.api.source;
-  protected readonly runYourOwnUrl = RUN_YOUR_OWN_URL;
   /** "Server" dialog: the URL being typed and the result of testing it. */
   protected readonly serverDraft = signal('');
   protected readonly serverTest = signal<'idle' | 'testing' | 'ok' | 'fail' | 'invalid'>('idle');
