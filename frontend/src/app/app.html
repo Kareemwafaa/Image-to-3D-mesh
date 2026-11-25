@@ -67,12 +67,11 @@
           <span class="dot" aria-hidden="true"></span>
           <p>
             <strong>No generation server is connected.</strong>
-            The model runs on a GPU that is switched on for demos only. Start your own for free in a
-            Colab or Kaggle notebook, then paste its link here.
+            The model runs on a GPU that is switched on for demos only. If you have a server link,
+            connect it here.
           </p>
           <div class="offline-actions">
             <button type="button" class="btn quiet" (click)="openServerDialog()">Connect a server</button>
-            <a class="btn link" [href]="runYourOwnUrl" target="_blank" rel="noopener">How to run one</a>
           </div>
         </aside>
       }
@@ -263,7 +262,7 @@
     </div>
     <p class="dialog-foot">
       Tip: share <span class="mono">?api=&lt;server URL&gt;</span> at the end of this page's address and
-      visitors connect automatically. <a [href]="runYourOwnUrl" target="_blank" rel="noopener">Run your own server</a>.
+      visitors connect automatically.
     </p>
   </form>
 </dialog>
