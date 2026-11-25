@@ -12,8 +12,8 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, input, OnInit, signal } from '@angul
         [attr.src]="src()"
         [attr.alt]="alt()"
         camera-controls
-        auto-rotate
-        auto-rotate-delay="1500"
+        [attr.auto-rotate]="autoRotate() ? '' : null"
+        auto-rotate-delay="1200"
         rotation-per-second="18deg"
         interaction-prompt="none"
         environment-image="neutral"
@@ -21,13 +21,16 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, input, OnInit, signal } from '@angul
         shadow-softness="0.8"
         exposure="1.05"
         touch-action="pan-y"
-      ></model-viewer>
+      >
+        <div slot="progress-bar"></div>
+      </model-viewer>
     }
   `,
 })
 export class ModelViewer implements OnInit {
   readonly src = input.required<string>();
   readonly alt = input('3D model');
+  readonly autoRotate = input(true);
   protected readonly ready = signal(false);
 
   ngOnInit() {
