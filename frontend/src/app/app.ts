@@ -1,6 +1,7 @@
-import { Component, computed, ElementRef, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
+import { Component, computed, ElementRef, HostListener, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
 import { ApiError, ApiService, JobStatus } from './api.service';
 import { ModelViewer } from './model-viewer';
+import { NgTemplateOutlet } from '@angular/common';
 
 const POLL_MS = 2500;
 // Consecutive failed status checks tolerated before giving up (network blips
@@ -34,7 +35,7 @@ type StepKey = (typeof PIPELINE)[number]['key'];
 
 @Component({
   selector: 'app-root',
-  imports: [ModelViewer],
+  imports: [ModelViewer, NgTemplateOutlet],
   templateUrl: './app.html',
 })
 export class App implements OnInit, OnDestroy {
@@ -52,10 +53,24 @@ export class App implements OnInit, OnDestroy {
     PIPELINE.filter((s) => s.key !== 'segmenting' || this.segmentStep()),
   );
   protected readonly resolutions = [
-    { value: 128, label: 'Draft' },
-    { value: 256, label: 'Standard' },
-    { value: 320, label: 'High' },
+    { value: 128, label: 'Fast', note: 'Rough shape, quickest' },
+    { value: 256, label: 'Balanced', note: 'Good detail for most objects' },
+    { value: 320, label: 'Fine', note: 'Most detail, slowest' },
   ];
+  protected readonly resolutionNote = computed(
+    () => this.resolutions.find((r) => r.value === this.resolution())?.note ?? '',
+  );
+  /** Viewer preferences on the result screen. */
+  protected readonly autoRotate = signal(true);
+  protected readonly darkStage = signal(false);
+  /** Which screen of the flow is showing. */
+  protected readonly view = computed<'empty' | 'ready' | 'working' | 'done'>(() => {
+    const k = this.phase().kind;
+    if (k === 'done') return 'done';
+    if (this.busy()) return 'working';
+    return this.file() ? 'ready' : 'empty';
+  });
+  protected readonly flowIndex = computed(() => ({ empty: 0, ready: 1, working: 1, done: 2 })[this.view()]);
   protected readonly accept = ACCEPTED.join(',');
   protected readonly file = signal<File | null>(null);
   protected readonly preview = signal<string | null>(null);
@@ -81,6 +96,7 @@ export class App implements OnInit, OnDestroy {
     const known = this.steps().find((s) => s.key === p.stage);
     return known ? known.key : this.segmentStep() ? 'segmenting' : 'multiview';
   });
+  protected readonly currentStepLabel = computed(() => this.steps()[this.stepIndex()]?.label ?? '');
   /** Index into steps() of the step currently running. */
   protected readonly stepIndex = computed(() => this.steps().findIndex((s) => s.key === this.stepKey()));
   protected readonly percent = computed(() => {
@@ -129,11 +145,19 @@ export class App implements OnInit, OnDestroy {
     this.pickFile((e.target as HTMLInputElement).files?.[0]);
   }
 
+  // The whole window accepts a dropped image.
+  @HostListener('window:dragover', ['$event'])
   protected onDragOver(e: DragEvent) {
     e.preventDefault();
-    if (!this.busy()) this.dragging.set(true);
+    if (!this.busy() && e.dataTransfer?.types.includes('Files')) this.dragging.set(true);
   }
 
+  @HostListener('window:dragleave', ['$event'])
+  protected onDragLeave(e: DragEvent) {
+    if (!e.relatedTarget) this.dragging.set(false);
+  }
+
+  @HostListener('window:drop', ['$event'])
   protected onDrop(e: DragEvent) {
     e.preventDefault();
     this.dragging.set(false);
