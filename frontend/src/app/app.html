@@ -1,100 +1,162 @@
-<main class="container">
-  <header>
-    <h1>Image to 3D</h1>
-    <p class="muted">Turn a single photo of an object into a 3D mesh you can download as .glb.</p>
-  </header>
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+      <path d="M4 7.4 12 12l8-4.6M12 12v9.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+    </svg>
+    <span class="brand-name">Image to 3D</span>
+  </div>
+  <div class="api-status" [attr.data-state]="apiOnline() === null ? 'checking' : apiOnline() ? 'online' : 'offline'">
+    <span class="dot"></span>
+    {{ apiOnline() === null ? 'Checking server' : apiOnline() ? 'Server online' : 'Server unreachable' }}
+  </div>
+</header>
 
-  <div class="grid">
-    <section class="panel">
-      <h2>1. Upload an image</h2>
-      <label
-        class="dropzone"
-        [class.dragging]="dragging()"
-        [class.disabled]="busy()"
-        (dragover)="onDragOver($event)"
-        (dragleave)="dragging.set(false)"
-        (drop)="onDrop($event)"
-      >
-        <input #fileInput type="file" [accept]="accept" [disabled]="busy()" (change)="onFileChange($event)" />
-        @if (preview(); as src) {
-          <img [src]="src" alt="Selected image" class="preview" />
-        } @else {
-          <span class="hint">
-            <span>Drop an image here or <u>browse</u></span>
-            <small>PNG, JPEG or WebP, up to 10 MB. One object on a plain background works best.</small>
-          </span>
-        }
-      </label>
+<div class="workspace">
+  <aside class="sidebar">
+    <section class="group">
+      <h2 class="label">Input image</h2>
+      <input #fileInput type="file" class="visually-hidden" [accept]="accept" [disabled]="busy()" (change)="onFileChange($event)" />
 
-      <label class="check">
-        <input
-          type="checkbox"
-          [checked]="removeBg()"
-          [disabled]="busy()"
-          (change)="removeBg.set($any($event.target).checked)"
-        />
-        Remove background before generating
-      </label>
-
-      <div class="actions">
-        <button class="primary" (click)="generate()" [disabled]="!file() || busy()">
-          {{ busy() ? 'Generating…' : 'Generate 3D mesh' }}
+      @if (preview(); as src) {
+        <div class="thumb" (dragover)="onDragOver($event)" (dragleave)="dragging.set(false)" (drop)="onDrop($event)" [class.dragging]="dragging()">
+          <img [src]="src" alt="Input image" />
+        </div>
+        <div class="file-row">
+          <div class="file-meta">
+            <span class="file-name" [title]="file()?.name">{{ file()?.name }}</span>
+            <span class="mono subtle">{{ formatBytes(file()?.size ?? 0) }}</span>
+          </div>
+          <button class="link" (click)="browse()" [disabled]="busy()">Replace</button>
+        </div>
+      } @else {
+        <button
+          type="button"
+          class="dropzone"
+          [class.dragging]="dragging()"
+          (click)="browse()"
+          (dragover)="onDragOver($event)"
+          (dragleave)="dragging.set(false)"
+          (drop)="onDrop($event)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="icon">
+            <path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span class="dz-title">Drop an image or click to browse</span>
+          <span class="subtle">PNG, JPEG or WebP, up to 10 MB</span>
         </button>
-        @if (file() || phase().kind !== 'idle') {
-          <button (click)="reset()">{{ busy() ? 'Cancel' : 'Start over' }}</button>
-        }
+      }
+      <p class="note">Works best with a single object, centered, on a plain background.</p>
+    </section>
+
+    <section class="group">
+      <h2 class="label">Settings</h2>
+      <label class="setting">
+        <span>
+          <span class="setting-title">Remove background</span>
+          <span class="subtle">Isolate the subject before reconstruction</span>
+        </span>
+        <span class="switch">
+          <input type="checkbox" [checked]="removeBg()" [disabled]="busy()" (change)="removeBg.set($any($event.target).checked)" />
+          <span class="track"></span>
+        </span>
+      </label>
+      <div class="setting column">
+        <span class="setting-title">Mesh resolution</span>
+        <div class="segmented" role="radiogroup" aria-label="Mesh resolution">
+          @for (r of resolutions; track r.value) {
+            <button
+              type="button"
+              role="radio"
+              [attr.aria-checked]="resolution() === r.value"
+              [class.active]="resolution() === r.value"
+              [disabled]="busy()"
+              (click)="resolution.set(r.value)"
+            >
+              {{ r.label }} <span class="mono">{{ r.value }}</span>
+            </button>
+          }
+        </div>
       </div>
     </section>
 
-    <section class="panel">
-      <h2>2. Your mesh</h2>
-      @let p = phase();
-      @switch (p.kind) {
-        @case ('idle') {
-          <div class="viewer placeholder">The 3D model will appear here.</div>
-        }
-        @case ('error') {
-          @if (p.kind === 'error') {
-            <div class="viewer placeholder error" role="alert">{{ p.message }}</div>
-          }
-        }
-        @case ('done') {
-          @if (p.kind === 'done') {
-            <app-model-viewer [src]="p.modelUrl" [alt]="'3D mesh generated from ' + baseName()" />
-            <div class="actions">
-              <a class="button primary" [href]="p.modelUrl" [attr.download]="baseName() + '.glb'">
-                Download .glb ({{ formatBytes(p.size) }})
-              </a>
-              <span class="muted">Drag to rotate, scroll to zoom.</span>
-            </div>
-          }
-        }
-        @default {
-          <div class="viewer placeholder" aria-live="polite">
-            <div class="progress-wrap">
-              <div class="progress-label">
-                <span>{{ progressLabel() }}</span>
-                <span class="muted">
-                  @if (percent() !== null) {
-                    {{ percent() }}% ·
-                  }
-                  {{ elapsed() }}s
-                </span>
-              </div>
-              <div
-                class="progress"
-                [class.indeterminate]="percent() === null"
-                role="progressbar"
-                aria-valuemin="0"
-                aria-valuemax="100"
-                [attr.aria-valuenow]="percent()"
-              >
-                <div [style.width.%]="percent()"></div>
-              </div>
-            </div>
-          </div>
+    <div class="actions">
+      @if (busy()) {
+        <button class="btn secondary block" (click)="cancelJob()">Cancel</button>
+      } @else {
+        <button class="btn primary block" (click)="generate()" [disabled]="!file()">
+          {{ phase().kind === 'done' || phase().kind === 'error' ? 'Generate again' : 'Generate mesh' }}
+        </button>
+        @if (file()) {
+          <button class="btn ghost block" (click)="reset()">Clear</button>
         }
       }
+    </div>
+
+    <section class="group job">
+      <h2 class="label">Job</h2>
+      <dl class="meta">
+        <dt>Status</dt>
+        <dd [attr.data-status]="phase().kind">{{ statusText() }}</dd>
+        <dt>ID</dt>
+        <dd class="mono">{{ currentJobId()?.slice(0, 12) ?? '—' }}</dd>
+        <dt>Elapsed</dt>
+        @let p0 = phase();
+        <dd class="mono">{{ p0.kind === 'done' ? formatTime(p0.seconds) : busy() ? formatTime(elapsed()) : '—' }}</dd>
+        <dt>Output</dt>
+        <dd class="mono">{{ p0.kind === 'done' ? 'GLB · ' + formatBytes(p0.size) : '—' }}</dd>
+      </dl>
     </section>
-  </div>
-</main>
+  </aside>
+
+  <main class="stage" #stage>
+    @let p = phase();
+    @if (p.kind === 'done') {
+      <app-model-viewer [src]="p.modelUrl" [alt]="'3D mesh reconstructed from ' + baseName()" />
+      <div class="stage-bar top">
+        <span class="chip mono">{{ baseName() }}.glb</span>
+        <a class="btn primary small" [href]="p.modelUrl" [attr.download]="baseName() + '.glb'">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-sm">
+            <path d="M12 4v12m0 0 4.5-4.5M12 16l-4.5-4.5M4 20h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          Download GLB
+        </a>
+      </div>
+      <div class="stage-bar bottom">
+        <span class="hint">Drag to orbit · Scroll to zoom · Right-drag to pan</span>
+      </div>
+    } @else if (busy()) {
+      <div class="stage-center">
+        <ol class="steps">
+          @for (s of steps; track s; let i = $index) {
+            <li [class.done]="i < stepIndex()" [class.current]="i === stepIndex()">
+              <span class="step-dot"></span>{{ s }}
+            </li>
+          }
+        </ol>
+        <div class="progress" [class.indeterminate]="percent() === null" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="percent()">
+          <div [style.width.%]="percent()"></div>
+        </div>
+        <div class="progress-meta mono">
+          <span>{{ percent() !== null ? percent() + '%' : statusText() + '…' }}</span>
+          <span>{{ formatTime(elapsed()) }}</span>
+        </div>
+      </div>
+    } @else if (p.kind === 'error') {
+      <div class="stage-center" role="alert">
+        <p class="stage-title">Generation failed</p>
+        <p class="stage-text">{{ p.message }}</p>
+        @if (file()) {
+          <button class="btn secondary small" (click)="generate()">Try again</button>
+        }
+      </div>
+    } @else {
+      <div class="stage-center">
+        <p class="stage-title">No model yet</p>
+        <p class="stage-text">
+          {{ file() ? 'Choose your settings and generate a mesh.' : 'Add an image on the left to reconstruct it as a 3D mesh.' }}
+        </p>
+      </div>
+    }
+  </main>
+</div>

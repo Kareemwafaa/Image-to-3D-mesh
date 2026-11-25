@@ -5,19 +5,23 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, input, OnInit, signal } from '@angul
 @Component({
   selector: 'app-model-viewer',
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
+  host: { class: 'model-host' },
   template: `
     @if (ready()) {
       <model-viewer
-        class="viewer"
         [attr.src]="src()"
         [attr.alt]="alt()"
         camera-controls
         auto-rotate
-        shadow-intensity="1"
+        auto-rotate-delay="1500"
+        rotation-per-second="18deg"
+        interaction-prompt="none"
+        environment-image="neutral"
+        shadow-intensity="0.9"
+        shadow-softness="0.8"
+        exposure="1.05"
         touch-action="pan-y"
       ></model-viewer>
-    } @else {
-      <div class="viewer placeholder">Loading viewer…</div>
     }
   `,
 })
