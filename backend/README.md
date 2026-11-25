@@ -246,7 +246,14 @@ MODEL_BACKEND=mock uvicorn app.main:app --reload
 pytest            # ~1-2 min; the NeuS test trains a tiny model on CPU
 ```
 
-### Deploy on Modal (recommended)
+### Free GPU: Colab or Kaggle notebook
+
+The easiest way to run the real pipeline. The notebook in
+[`notebooks/facet_backend.ipynb`](../notebooks/facet_backend.ipynb) installs a pinned environment
+(`scripts/setup_gpu_env.sh`), starts the API on the free T4 and exposes it through a Cloudflare quick
+tunnel (`scripts/serve_public.py`). Step by step: [docs/run-on-a-free-gpu.md](../docs/run-on-a-free-gpu.md).
+
+### Deploy on Modal (optional)
 
 ```bash
 pip install modal && modal setup
@@ -277,7 +284,7 @@ Here jobs run in a thread inside the API process, one at a time.
 | --- | --- | --- |
 | `MODEL_BACKEND` | `multiview` | `multiview`, `triposr` (baseline) or `mock` |
 | `DEVICE` | `auto` | `cuda`, `cpu` or `auto` |
-| `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins |
+| `CORS_ORIGINS` | `http://localhost:3000,http://localhost:4200` | Comma-separated allowed origins, or `*` for any (the API uses no cookies) |
 | `DATA_DIR` | `./data` | Where inputs, views and meshes are stored |
 | `MAX_UPLOAD_MB` | `10` | Upload limit |
 | `JOB_TTL_HOURS` | `24` | Finished jobs are deleted after this; `0` keeps them |
