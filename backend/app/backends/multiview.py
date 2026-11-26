@@ -29,7 +29,7 @@ _CLEAN = 0.82
 _TEXTURE = 0.88
 
 # Taubin iterations when the request does not say. NeuS surfaces are noisier.
-_SMOOTHING = {"instantmesh": 3, "neus": 10}
+_SMOOTHING = {"instantmesh": 5, "neus": 10}
 
 
 class MultiViewBackend:
@@ -44,11 +44,13 @@ class MultiViewBackend:
         instantmesh_variant: str = "large",
         preload_instantmesh: bool = True,
         low_vram: bool | None = None,
+        instantmesh_grid_res: int | None = None,
     ) -> None:
         self.device = resolve_device(device)
         self.generator = multiview.Zero123PlusGenerator(model_id, pipeline_id, self.device, unet=unet)
         self.instantmesh_variant = instantmesh_variant
         self.preload_instantmesh = preload_instantmesh
+        self.instantmesh_grid_res = instantmesh_grid_res
         # None = decide from the GPU: under 20 GiB (a free T4 has 15), move Zero123++
         # to CPU RAM while reconstructing.
         self.low_vram = _small_gpu(self.device) if low_vram is None else low_vram
@@ -59,7 +61,9 @@ class MultiViewBackend:
         if self._lrm is None:
             from ..pipeline.instantmesh import InstantMeshReconstructor
 
-            self._lrm = InstantMeshReconstructor(self.instantmesh_variant, self.device)
+            self._lrm = InstantMeshReconstructor(
+                self.instantmesh_variant, self.device, grid_res=self.instantmesh_grid_res
+            )
         return self._lrm
 
     def load(self) -> None:
@@ -149,6 +153,8 @@ class MultiViewBackend:
                 masks=mask_arr,
                 vertex_colors=colors,
                 resolution=options.texture_size,
+                reference=_object_pixels(image),
+                color_match=options.color_match,
             )
         elif colors is not None:
             mesh.visual.vertex_colors = colors
@@ -167,6 +173,17 @@ class MultiViewBackend:
 
 # Old name, kept so existing imports keep working.
 MultiViewNeuSBackend = MultiViewBackend
+
+
+def _object_pixels(image: Image.Image, limit: int = 200_000) -> np.ndarray | None:
+    """RGB values in [0, 1] of the (segmented) input photo's opaque pixels."""
+    rgba = np.asarray(image.convert("RGBA"), dtype=np.float64) / 255.0
+    px = rgba[rgba[..., 3] > 0.5][:, :3]
+    if len(px) < 100:
+        return None
+    if len(px) > limit:
+        px = px[np.random.default_rng(0).choice(len(px), limit, replace=False)]
+    return px
 
 
 def _small_gpu(device: str, threshold_gib: float = 20.0) -> bool:

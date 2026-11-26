@@ -75,12 +75,18 @@ class Settings(BaseSettings):
     # "instantmesh": the white-background UNet InstantMesh was trained with (best for both reconstructors)
     zero123pp_unet: Literal["instantmesh", "original"] = "instantmesh"
     instantmesh_variant: Literal["large", "base"] = "large"
+    # FlexiCubes grid for InstantMesh (trained at 128). Higher resolves cavities and thin walls
+    # better at the cost of time and memory; 192 is a reasonable try on a T4.
+    instantmesh_grid_res: int = Field(128, ge=64, le=256)
     # Load InstantMesh at start-up. Set false to save ~2 GB of GPU memory if you only use NeuS.
     preload_instantmesh: bool = True
     # Move Zero123++ to CPU RAM while reconstructing. Unset = automatic (GPUs under 20 GiB).
     low_vram: Optional[bool] = None
     default_reconstructor: Literal["instantmesh", "neus"] = Field(
         "instantmesh", validation_alias=AliasChoices("RECONSTRUCTOR", "DEFAULT_RECONSTRUCTOR")
+    )
+    default_color_match: float = Field(
+        1.0, ge=0.0, le=1.0, validation_alias=AliasChoices("COLOR_MATCH", "DEFAULT_COLOR_MATCH")
     )
     default_texture_size: int = Field(1024, validation_alias=AliasChoices("TEXTURE_SIZE", "DEFAULT_TEXTURE_SIZE"))
     default_target_faces: int = Field(40_000, validation_alias=AliasChoices("TARGET_FACES", "DEFAULT_TARGET_FACES"))

@@ -22,6 +22,17 @@ surface instead ("projective texturing"):
 4. colour = sum_i w_i c_i / sum_i w_i. Texels that no view sees (e.g. the
    underside, which no Zero123++ camera looks at) fall back to the
    reconstructor's own colour, interpolated from the vertices.
+   The six views are separate diffusion samples and disagree a little in
+   colour; averaging them mixes those disagreements into blotches. So k is
+   high (12: at 30 degrees off-axis a view's weight is already a fifth of the
+   head-on one), which makes each texel come almost entirely from its best
+   view and keeps blending to narrow seams. Silhouettes are eroded by a few
+   pixels, because edge pixels mix object and background colour.
+4b. Colour matching (Reinhard et al., 2001, in YCbCr instead of Lab): the views
+   come out with their own exposure and tint (a matte black mug turned light
+   grey). We shift the texture's luma mean and spread to the input photo's,
+   and pull its chroma towards the photo's, shrinking the chroma spread
+   when the photo is less colourful. That also mutes leftover colour blotches.
 5. Charts are padded by dilating colours into empty texels, so bilinear and
    mip-mapped lookups at chart borders do not bleed background into seams.
 """
@@ -82,6 +93,45 @@ def _bilinear(img: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return top * (1 - fy) + bottom * fy
 
 
+def _to_ycbcr(rgb: np.ndarray) -> np.ndarray:
+    y = rgb @ np.array([0.299, 0.587, 0.114])
+    return np.stack([y, (rgb[:, 2] - y) * 0.564, (rgb[:, 0] - y) * 0.713], axis=-1)
+
+
+def _from_ycbcr(ycc: np.ndarray) -> np.ndarray:
+    y, cb, cr = ycc[:, 0], ycc[:, 1], ycc[:, 2]
+    return np.stack([y + 1.403 * cr, y - 0.344 * cb - 0.714 * cr, y + 1.773 * cb], axis=-1)
+
+
+def match_colors(colors: np.ndarray, reference: np.ndarray, strength: float = 1.0) -> np.ndarray:
+    """Statistics transfer of (K, 3) RGB colours towards (M, 3) reference pixels, both in [0, 1].
+    Luma: mean and spread matched (spread ratio clamped to [0.5, 2]). Chroma: mean matched,
+    spread only ever reduced, so a colourful texture can calm down but noise is never amplified."""
+    if len(colors) == 0 or len(reference) == 0 or strength <= 0:
+        return colors
+    src, ref = _to_ycbcr(colors), _to_ycbcr(reference)
+    mu_s, sd_s = src.mean(0), src.std(0) + 1e-6
+    mu_r, sd_r = ref.mean(0), ref.std(0) + 1e-6
+    scale = sd_r / sd_s
+    scale[0] = np.clip(scale[0], 0.5, 2.0)
+    scale[1:] = np.minimum(scale[1:], 1.0)
+    out = _from_ycbcr((src - mu_s) * scale + mu_r)
+    return np.clip(colors + strength * (out - colors), 0.0, 1.0)
+
+
+def erode(mask: np.ndarray, pixels: int) -> np.ndarray:
+    """Shrink a (H, W) soft mask by taking the minimum over a (2p+1)^2 window."""
+    if pixels <= 0:
+        return mask
+    out = mask.copy()
+    padded = np.pad(mask, pixels, mode="edge")
+    h, w = mask.shape
+    for dy in range(2 * pixels + 1):
+        for dx in range(2 * pixels + 1):
+            np.minimum(out, padded[dy : dy + h, dx : dx + w], out=out)
+    return out
+
+
 def dilate(color: np.ndarray, known: np.ndarray, iterations: int) -> tuple[np.ndarray, np.ndarray]:
     """Grow known texels into unknown ones by averaging known 8-neighbours."""
     color = color.copy()
@@ -116,15 +166,20 @@ def bake_texture(
     masks: np.ndarray | None = None,
     vertex_colors: np.ndarray | None = None,
     resolution: int = 1024,
-    sharpness: float = 4.0,
+    sharpness: float = 12.0,
     mask_threshold: float = 0.8,
+    mask_erosion: int = 2,
     depth_tolerance: float = 0.02,
+    reference: np.ndarray | None = None,
+    color_match: float = 1.0,
 ) -> trimesh.Trimesh:
     """Return a z-up mesh with UVs and a baked baseColor texture.
 
     vertices/faces: the (cleaned) mesh in the cameras' world frame.
     views: (V, H, W, 3) in [0, 1]; masks: (V, H, W) in [0, 1] or None.
     vertex_colors: (N, 3|4) uint8 fallback for texels that no view sees.
+    reference: (M, 3) RGB pixels of the object in the input photo, in [0, 1]; when
+    given, the texture's colours are matched to it (`color_match` = strength).
     """
     vertices = np.asarray(vertices, dtype=np.float64)
     faces = np.asarray(faces, dtype=np.int64)
@@ -161,7 +216,8 @@ def bake_texture(
         cos = (nrm * to_cam).sum(1)
         w = np.where(visible & (cos > 0.05), np.clip(cos, 0, 1) ** sharpness, 0.0)
         if masks is not None:
-            inside = _bilinear(masks[i][..., None].astype(np.float64), x, y)[:, 0]
+            m = erode(masks[i].astype(np.float64), mask_erosion)
+            inside = _bilinear(m[..., None], x, y)[:, 0]
             w = np.where(inside >= mask_threshold, w, 0.0)
         sel = w > 0
         if sel.any():
@@ -175,6 +231,8 @@ def bake_texture(
         vc = np.asarray(vertex_colors, dtype=np.float64)[:, :3] / 255.0
         color[~seen] = (vc[corner[~seen]] * bary[~seen]).sum(1)
         seen[:] = True
+    if reference is not None and color_match > 0:
+        color[seen] = match_colors(color[seen], np.asarray(reference, dtype=np.float64), color_match)
     log.info("texture: %d texels, %.1f%% seen by a view", len(pos), 100.0 * (wsum > 1e-8).mean() if len(pos) else 0)
 
     # 5. write the atlas and pad the charts
