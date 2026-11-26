@@ -19,6 +19,8 @@ def main() -> None:
 
     for key, value in lite_defaults().items():
         os.environ.setdefault(key, value)
+    # Before torch is imported: grow memory segments instead of fragmenting a small GPU.
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     import uvicorn
 

@@ -183,11 +183,57 @@ def import_upstream(cache_dir: Path | None = None) -> types.SimpleNamespace:
         lrm_mesh = importlib.import_module(f"{PACKAGE}.models.lrm_mesh")
         fc_geometry = importlib.import_module(f"{PACKAGE}.models.geometry.rep_3d.flexicubes_geometry")
         camera_util = importlib.import_module(f"{PACKAGE}.utils.camera_util")
+        plane_utils = importlib.import_module(f"{PACKAGE}.models.renderer.utils.renderer")
         return types.SimpleNamespace(
+            sample_from_planes=plane_utils.sample_from_planes,
             InstantMesh=lrm_mesh.InstantMesh,
             FlexiCubesGeometry=fc_geometry.FlexiCubesGeometry,
             input_cameras=camera_util.get_zero123plus_input_cameras,
         )
+
+
+def chunked_geometry_prediction(synthesizer, sample_from_planes, chunk: int = 2**18):
+    """A drop-in for upstream's TriplaneSynthesizer.get_geometry_prediction that
+    never materialises a full-grid tensor.
+
+    Upstream predicts the FlexiCubes weights from the features of each cube's 8
+    corners, gathered for all 128^3 cubes at once: 2.1M x 8 x 240 floats, a single
+    15 GiB tensor (fine on the A100s it was trained on, an out-of-memory error on a
+    16 GB T4). Here points and cubes are processed in chunks, and each chunk's
+    corner features are re-sampled from the triplane instead of gathered from a
+    stored full-grid copy. Same maths, same outputs, peak memory ~chunk-sized.
+    """
+
+    def predict(planes, sample_coordinates, flexicubes_indices):
+        import torch
+
+        axes = synthesizer.plane_axes.to(planes.device)
+        warp = synthesizer.rendering_kwargs["box_warp"]
+        dec = synthesizer.decoder
+
+        def features(points):  # (N, K, 3) -> (N, K, 3 * C)
+            f = sample_from_planes(axes, planes, points, padding_mode="zeros", box_warp=warp)
+            n, p, k, c = f.shape
+            return f.permute(0, 2, 1, 3).reshape(n, k, p * c)
+
+        n_points = sample_coordinates.shape[1]
+        sdf, deformation = [], []
+        for i in range(0, n_points, chunk):
+            f = features(sample_coordinates[:, i : i + chunk])
+            sdf.append(dec.net_sdf(f))
+            deformation.append(dec.net_deformation(f))
+            del f
+
+        weight = []
+        cubes_per_chunk = max(1, chunk // flexicubes_indices.shape[1])
+        for j in range(0, flexicubes_indices.shape[0], cubes_per_chunk):
+            idx = flexicubes_indices[j : j + cubes_per_chunk]
+            f = features(sample_coordinates[:, idx.reshape(-1)])
+            weight.append(dec.net_weight(f.reshape(f.shape[0], idx.shape[0], -1)) * 0.1)
+            del f
+        return torch.cat(sdf, 1), torch.cat(deformation, 1), torch.cat(weight, 1)
+
+    return predict
 
 
 @dataclass
@@ -219,6 +265,9 @@ class InstantMeshReconstructor:
         if state_dict is not None:
             model.load_state_dict(state_dict, strict=True)
         model = model.to(self.device).eval()
+        model.synthesizer.get_geometry_prediction = chunked_geometry_prediction(
+            model.synthesizer, up.sample_from_planes
+        )
         # Upstream's init_flexicubes_geometry() also builds an nvdiffrast renderer,
         # which inference does not need; build the geometry alone.
         model.geometry = up.FlexiCubesGeometry(
