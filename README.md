@@ -95,7 +95,7 @@ smoke test on every pull request.
 ## Run it
 
 The models need an NVIDIA GPU with roughly 12 GB of memory or more (the free T4 has 15 GB).
-Pick one of three ways.
+Pick one of two ways.
 
 ### 1. Free GPU on Colab or Kaggle
 
@@ -116,10 +116,6 @@ The API is then on `http://127.0.0.1:8000` (interactive docs at `/docs`). Drop `
 also get a public URL. Docker and the full multi-service setup are described in
 [backend/README.md](backend/README.md#run-it).
 
-### 3. Cloud GPU (optional)
-
-The backend can also be deployed to [Modal](https://modal.com), which bills per second and scales
-to zero. See [backend/README.md](backend/README.md#run-it).
 
 ### The web app
 
