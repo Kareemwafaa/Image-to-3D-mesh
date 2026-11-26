@@ -8,6 +8,9 @@ from typing import Optional, Protocol
 
 from PIL import Image
 
+# How the 6 views become a mesh: a feed-forward model (default) or a per-object fit.
+RECONSTRUCTORS = ("instantmesh", "neus")
+
 
 class ProgressFn(Protocol):
     def __call__(self, value: float, stage: Optional[str] = None) -> None: ...
@@ -20,7 +23,12 @@ class GenerateOptions:
     mc_resolution: int = 256
     # multiview backend only
     diffusion_steps: int = 75
-    recon_iters: int = 2500
+    reconstructor: str = "instantmesh"  # one of RECONSTRUCTORS
+    recon_iters: int = 2500  # neus only
+    texture: bool = True  # bake a texture from the views (else vertex colours)
+    texture_size: int = 1024
+    target_faces: int = 40_000  # quadric decimation target; 0 keeps every face
+    smooth_iters: Optional[int] = None  # Taubin iterations; None = per-reconstructor default
     seed: Optional[int] = None
 
     def to_dict(self) -> dict:

@@ -1,4 +1,4 @@
-"""Stage 6: turn the SDF into a coloured triangle mesh.
+"""Stage 5 (classic mode): turn the NeuS SDF into a coloured triangle mesh.
 
 Marching cubes (Lorensen & Cline, 1987) samples f on a regular N^3 grid and,
 in every cell whose corners change sign, places triangle vertices on the edges
@@ -9,7 +9,9 @@ accurate and the mesh is watertight.
 After extraction: drop small disconnected floaters, make the
 triangles face outward (agree with grad f), and colour each vertex by querying
 the colour field looking straight at the surface (view direction = -normal).
-glTF is y-up with the front facing +z, so the z-up reconstruction is rotated.
+The mesh stays in the z-up world frame of the cameras so that cleanup and
+texture baking (postprocess.py, texturing.py) can use the same cameras;
+`export_glb` rotates it to glTF's y-up frame at the very end.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from skimage import measure
 
 from .errors import MeshingError
 from .neus import NeuSModel
+from .postprocess import drop_floaters
 
 
 @torch.no_grad()
@@ -53,17 +56,15 @@ def zup_to_gltf(verts: np.ndarray) -> np.ndarray:
     return verts[:, [1, 2, 0]]
 
 
-def drop_floaters(mesh: trimesh.Trimesh, min_fraction: float = 0.05) -> trimesh.Trimesh:
-    """Remove disconnected pieces smaller than `min_fraction` of the largest one.
-    (Keeping only the largest would also delete genuinely separate parts.)"""
-    parts = mesh.split(only_watertight=False)
-    if len(parts) <= 1:
-        return mesh
-    largest = max(p.area for p in parts)
-    return trimesh.util.concatenate([p for p in parts if p.area >= min_fraction * largest])
+def export_glb(mesh: trimesh.Trimesh, path) -> None:
+    """Write a z-up mesh (vertex colours or a texture) as a y-up .glb."""
+    out = mesh.copy()
+    out.vertices = zup_to_gltf(np.asarray(mesh.vertices))
+    out.export(path, file_type="glb")
 
 
 def extract_mesh(model: NeuSModel, resolution: int = 256, device: str = "cuda") -> trimesh.Trimesh:
+    """Marching cubes on the fitted SDF; returns a z-up mesh with vertex colours."""
     sdf = sample_sdf_grid(model, resolution, device)
     if sdf.min() > 0 or sdf.max() < 0:
         raise MeshingError("The reconstructed SDF has no surface (no zero crossing).")
@@ -80,10 +81,9 @@ def extract_mesh(model: NeuSModel, resolution: int = 256, device: str = "cuda") 
         mesh.invert()
 
     rgba = np.concatenate([colors, np.ones((len(colors), 1))], axis=1)
-    out = trimesh.Trimesh(
-        vertices=zup_to_gltf(np.asarray(mesh.vertices)),
+    return trimesh.Trimesh(
+        vertices=np.asarray(mesh.vertices),
         faces=np.asarray(mesh.faces),
         vertex_colors=(rgba * 255).clip(0, 255).astype(np.uint8),
         process=False,
     )
-    return out

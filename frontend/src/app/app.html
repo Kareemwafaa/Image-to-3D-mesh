@@ -165,6 +165,18 @@
         </label>
 
         <div class="option stacked">
+          <span class="option-name" id="engine-label">Reconstruction</span>
+          <div class="segmented" role="radiogroup" aria-labelledby="engine-label">
+            @for (e of engines; track e.value) {
+              <button type="button" role="radio" [attr.aria-checked]="engine() === e.value"
+                [class.on]="engine() === e.value" (click)="engine.set(e.value)">{{ e.label }}</button>
+            }
+          </div>
+          <span class="option-note">{{ engineInfo().note }}</span>
+        </div>
+
+        @if (engine() === 'neus') {
+        <div class="option stacked">
           <span class="option-name" id="detail-label">Detail</span>
           <div class="segmented" role="radiogroup" aria-labelledby="detail-label">
             @for (r of resolutions; track r.value) {
@@ -174,6 +186,7 @@
           </div>
           <span class="option-note">{{ resolutionNote() }}</span>
         </div>
+        }
 
         @if (p.kind === 'error') {
           <p class="banner" role="alert">{{ p.message }}</p>
@@ -183,7 +196,7 @@
           <button class="btn primary wide" (click)="generate()">
             {{ p.kind === 'error' ? 'Try again' : 'Generate 3D model' }}
           </button>
-          <p class="eta">Takes a few minutes on a GPU.</p>
+          <p class="eta">{{ engineInfo().eta }}</p>
           <button class="btn link" (click)="browse()">Use a different photo</button>
         </div>
       } @else {

@@ -30,6 +30,23 @@ def test_lite_gpu_lock_has_every_zero123plus_import():
     assert ZERO123PLUS_IMPORTS <= lock.keys(), ZERO123PLUS_IMPORTS - lock.keys()
 
 
+# Everything the InstantMesh source, cleanup and texture baking import (see app/doctor.py).
+QUALITY_IMPORTS = {"einops", "opencv-python-headless", "scipy", "fast-simplification", "xatlas", "trimesh"}
+
+
+def test_lite_gpu_lock_has_the_quality_stage_packages():
+    lock = pinned(REQS / "lite-gpu.txt")
+    assert QUALITY_IMPORTS <= lock.keys(), QUALITY_IMPORTS - lock.keys()
+
+
+def test_doctor_checks_every_locked_runtime_package():
+    """The notebook's dependency check must cover each package the stages import."""
+    from app.doctor import REQUIRED
+
+    checked = {pkg for _, pkg, _ in REQUIRED}
+    assert (ZERO123PLUS_IMPORTS - {"numpy", "pillow"}) | QUALITY_IMPORTS <= checked
+
+
 def test_torchvision_matches_torch():
     """torchvision 0.N+15 is built for torch 2.N; a mismatch fails at import time."""
     lock = pinned(REQS / "lite-gpu.txt")
@@ -37,3 +54,15 @@ def test_torchvision_matches_torch():
     vision_minor = int(lock["torchvision"].split(".")[1])
     pair = (lock["torch"], lock["torchvision"])
     assert lock["torchvision"].startswith("0.") and vision_minor == torch_minor + 15, pair
+
+
+def test_doctor_reports_missing_packages(capsys, monkeypatch):
+    from app import doctor
+
+    checks = doctor.check_imports((("json", "json", "x"), ("surely_not_installed_pkg", "nope", "the test")))
+    assert [c.ok for c in checks] == [True, False]
+    assert "pip install nope" in checks[1].detail
+
+    monkeypatch.setattr(doctor, "run", lambda **_: checks)
+    assert doctor.main(["--no-gpu"]) == 1
+    assert "FAIL" in capsys.readouterr().out

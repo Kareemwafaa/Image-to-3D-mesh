@@ -2,28 +2,38 @@
 
 A service that turns one photo of an object into a textured 3D mesh (`.glb`).
 It is a two-stage generative reconstruction pipeline: a diffusion model
-imagines the unseen sides of the object, then a neural signed distance field
-is optimised to agree with those views, and marching cubes extracts the surface.
+imagines the unseen sides of the object, then a reconstructor turns those
+views into a surface. The default reconstructor is InstantMesh, a feed-forward
+sparse-view model (seconds); the classic one fits a neural signed distance
+field (NeuS) to the views (minutes). Either way the mesh is cleaned up and
+textured by projecting the views back onto it.
 
 ```mermaid
 flowchart LR
     A[Photo] --> B["1. Segmentation<br/>U²-Net"]
     B --> C["2. Multi-view diffusion<br/>Zero123++ v1.2"]
-    C -->|6 views| D["Per-view masks<br/>U²-Net"]
-    C -->|6 views| E
-    D --> E["3-5. NeuS reconstruction<br/>SDF + volume rendering<br/>fixed known cameras"]
-    E --> F["6. Marching cubes<br/>+ vertex colour"]
-    F --> G[.glb]
+    C -->|6 views| R{"4-5. Reconstruction"}
+    R -->|default| IM["InstantMesh<br/>DINO + triplane transformer<br/>+ FlexiCubes"]
+    R -->|classic| NS["NeuS fit<br/>+ marching cubes"]
+    IM --> CL["6. Cleanup<br/>floaters, holes, Taubin,<br/>QEM decimation"]
+    NS --> CL
+    CL --> TX["7. Texture baking<br/>xatlas UVs + projection<br/>of the 6 views"]
+    TX --> G[.glb]
 ```
 
 | Stage | Module | Method |
 | --- | --- | --- |
 | 1 | `app/pipeline/segmentation.py` | U²-Net salient object segmentation (rembg), crop and centre |
-| 2 | `app/pipeline/multiview.py` | Zero123++ v1.2: six consistent novel views from one image |
+| 2 | `app/pipeline/multiview.py` | Zero123++ v1.2 (InstantMesh's white-background UNet): six consistent novel views |
 | 3 | `app/pipeline/cameras.py` | The six fixed camera poses, pixel rays |
-| 4 | `app/pipeline/neus.py` | NeuS neural SDF, multi-resolution grid encoding, unbiased volume rendering |
-| 5 | `app/pipeline/reconstruct.py` | Per-object optimisation with RGB, silhouette and Eikonal losses |
-| 6 | `app/pipeline/meshing.py` | Marching cubes, floater removal, vertex colours, glTF export |
+| 4-5 | `app/pipeline/instantmesh.py` | **Default.** InstantMesh LRM: views + cameras to triplane to FlexiCubes mesh, one forward pass |
+| 4 | `app/pipeline/neus.py` | Classic: NeuS neural SDF, multi-resolution grid encoding, unbiased volume rendering |
+| 5 | `app/pipeline/reconstruct.py`, `meshing.py` | Classic: per-object optimisation (RGB, silhouette, Eikonal), marching cubes |
+| 6 | `app/pipeline/postprocess.py` | Floater removal, hole filling, Taubin smoothing, quadric decimation |
+| 7 | `app/pipeline/texturing.py`, `raster.py` | UV unwrap, visibility-aware projective texturing, seam padding, glTF export |
+
+Why InstantMesh is the default, with its theory, is in
+[ADR 0010](../docs/architecture/adr/0010-instantmesh-texture-baking-cleanup.md).
 
 Around the pipeline sits a small distributed system: a FastAPI gateway, a
 Redis Streams job queue, GPU workers, Postgres and S3 storage, with retries,
@@ -153,13 +163,47 @@ extra machinery (SuGaR, 2D Gaussian splatting) and is fragile with only six
 views. An SDF has the surface built in, the Eikonal prior regularises the
 sparse-view problem, and marching cubes gives a watertight mesh directly.
 
-### Why not one feed-forward network?
+### 7. InstantMesh (the default reconstructor)
 
-Feed-forward reconstructors (TripoSR, LRM, InstantMesh's LRM) answer in about
-a second, but are limited to what one network pass can represent. The
-optimisation-based second stage here is slower (minutes) but its result is
-fitted to the specific object, is easy to inspect (you can see the six views
-it was fitted to), and each stage is replaceable.
+A Large Reconstruction Model maps the six views straight to a shape. A DINO
+ViT-B/16 encodes each view into patch tokens, with the view's camera injected
+through adaptive LayerNorm. A 16-layer transformer turns learned queries into
+a **triplane** (three 64×64 feature planes, xy/xz/yz): each layer
+cross-attends from the plane tokens to all 2400 view tokens. A point's feature
+is the sum of three bilinear plane lookups, so the 3D field costs O(N²)
+memory. Small MLPs read SDF, vertex offsets and colour from it, and
+**FlexiCubes** extracts the mesh on a 128³ grid with learned per-cube
+interpolation weights. That extraction is differentiable, so the model was
+trained on rendered depth, normals and silhouettes of its own mesh: geometry
+supervision that NeuS never gets.
+
+InstantMesh's code is not on PyPI, so `ensure_source()` downloads upstream's
+`src/` at a pinned commit into `~/.cache/facet/` (as package
+`instantmesh_src`). Upstream imports nvdiffrast, which needs a CUDA compiler;
+inference does not use it, so a stub stands in when it is missing.
+
+### 8. Cleanup and texture baking
+
+`postprocess.py`: drop floaters, close holes up to 200 edges (fan around the
+centroid, wound to match its neighbours), **Taubin smoothing** (λ = 0.5,
+μ = −0.53: a shrink step and an inflate step together form a low-pass filter,
+so bumps disappear but the volume does not), then **quadric error metric
+decimation** to 40k faces (each edge collapse is chosen to minimise the summed
+squared distance to the original faces' planes).
+
+`texturing.py`: xatlas cuts the mesh into charts and packs them in a 1024²
+atlas. Rasterising in UV space gives each texel a 3D point and normal. Each
+texel is projected into the six views; a z-buffer (the same NumPy rasteriser,
+`raster.py`) rejects views where it is hidden, the view's mask rejects
+background pixels, and the weight `max(0, n·d)⁴` prefers the camera that
+sees it most head-on. Texels no camera sees take the model's own colour.
+
+### Why keep NeuS?
+
+It is the "classic" baseline: per-object optimisation, fully inspectable,
+with no learned prior. Running both on the same six views shows what the
+learned prior buys (`reconstructor=neus`, or *Reconstruction: NeuS* in the
+web app).
 
 ## What has been verified, and what are guesses
 
@@ -170,7 +214,24 @@ synthetic scenes rendered from the six Zero123++ cameras (an off-centre sphere
 in the test suite; two coloured spheres at 64 px and 400 steps reached a mean
 surface error of 0.018 with correct colours).
 
+Verified for the quality stages (CPU, `tests/test_quality.py`): cleanup on a
+noisy, holey sphere with a floater (watertight, volume within 5%, decimated);
+texture baking of a two-tone sphere rendered analytically from the six
+cameras (over 99% of texels in the right colour at 320 px and 1024²; a
+330k-face mesh cleaned to 40k faces and baked in about 13 s on 4 CPU cores,
+1.0 MB `.glb` instead of 5.9 MB); the multiview backend end to end with
+stand-ins for Zero123++ and InstantMesh; and upstream InstantMesh's real code
+(tiny random weights, CPU) running through our wrapper without nvdiffrast.
+
+Measured on a GPU (2026-11-26, Kaggle T4, NeuS mode): a mug in 5:57, right
+shape, lumpy surface, 9.4 MB. That run is what motivated ADR 0010.
+
 Not run yet, because this environment has no GPU and cannot reach Hugging Face:
+
+- **InstantMesh with its real weights**, the white-background UNet, and the
+  speed and memory on a T4. GUESS: Zero123++ (fp16) plus InstantMesh-large fit
+  in 16 GB and the whole job takes under a minute. If memory runs out, set
+  `INSTANTMESH_VARIANT=base`, or `RECONSTRUCTOR=neus PRELOAD_INSTANTMESH=false`.
 
 - **Zero123++ inference and the Modal deployment** have not been run. The code
   follows the authors' README and pipeline source (diffusers 0.20.2).
@@ -180,8 +241,9 @@ Not run yet, because this environment has no GPU and cannot reach Hugging Face:
 - **GUESS: azimuth direction.** Counter-clockwise seen from +z, as in InstantMesh.
   If generated views come out mirrored relative to the cameras, the reconstruction
   will be poor; flipping the sign of `ZERO123PP_AZIMUTHS` fixes it.
-- **GUESS: timings.** Roughly 10-20 s for diffusion and 1-3 min for
-  reconstruction on an A10G. Lower `recon_iters` or `diffusion_steps` for speed.
+- **GUESS: timings.** Roughly 10-30 s for diffusion and about 10 s for
+  InstantMesh plus cleanup and baking on a T4. NeuS mode took 5:57 in total on
+  a T4. Lower `recon_iters` or `diffusion_steps` for speed.
 - **GUESS: hyperparameters** (`ReconConfig`) were chosen by reasoning and
   synthetic tests, not tuned on real generated views.
 
@@ -206,9 +268,13 @@ Interactive docs are served at `/docs`. The full route list is in
 | `image` | | | PNG, JPEG or WebP, up to 10 MB |
 | `remove_background` | `true` | | `false` if the image already has transparency |
 | `foreground_ratio` | `0.85` | 0.5 to 1.0 | How much of the frame the object fills |
-| `mc_resolution` | `256` | 32 to 512 | Marching cubes grid. Higher means finer mesh |
+| `mc_resolution` | `256` | 32 to 512 | Marching cubes grid (NeuS only). Higher means finer mesh |
 | `diffusion_steps` | `75` | 10 to 150 | Zero123++ denoising steps |
-| `recon_iters` | `2500` | 100 to 20000 | NeuS optimisation steps |
+| `reconstructor` | `instantmesh` | `instantmesh`, `neus` | Feed-forward model (fast) or the classic per-object fit |
+| `recon_iters` | `2500` | 100 to 20000 | NeuS optimisation steps (NeuS only) |
+| `texture` | `true` | | Bake a texture from the views; `false` keeps vertex colours |
+| `texture_size` | `1024` | 256 to 2048 | Texture atlas size in pixels |
+| `target_faces` | `40000` | 0 to 500000 | Decimation target; `0` keeps every triangle |
 | `seed` | random | | Fix it for reproducible views |
 
 `GET /v1/jobs/{id}`:
@@ -325,6 +391,11 @@ All settings are environment variables (`app/core/config.py` has the full list).
 | `JOB_TTL_HOURS` | `0` | Delete job outputs after this; `0` keeps them |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | none | Turns tracing on |
 | `DIFFUSION_STEPS`, `RECON_ITERS`, `MC_RESOLUTION`, `FOREGROUND_RATIO` | | Defaults for the form fields above |
+| `RECONSTRUCTOR`, `TEXTURE_SIZE`, `TARGET_FACES` | `instantmesh`, `1024`, `40000` | Defaults for the quality form fields |
+| `INSTANTMESH_VARIANT` | `large` | `large` or `base` (smaller, less GPU memory) |
+| `PRELOAD_INSTANTMESH` | `true` | Load InstantMesh at start-up; `false` if you only use NeuS |
+| `ZERO123PP_UNET` | `instantmesh` | `instantmesh` (white background) or `original` (sudo-ai's gray) |
+| `INSTANTMESH_SRC` | download | Use an existing checkout of InstantMesh's `src/` (renamed `instantmesh_src`) |
 
 ## Next steps worth doing
 
@@ -334,9 +405,8 @@ All settings are environment variables (`app/core/config.py` has the full list).
 - Estimate the input view's elevation and add it as a seventh supervised view.
 - Use Zero123++'s normal-generation ControlNet for normal supervision and
   cleaner masks.
-- Texture: UV-unwrap (xatlas) and bake the colour field into a texture image
-  instead of per-vertex colours.
-- Mesh decimation (quadric error metrics) to shrink the `.glb`.
+- Compare InstantMesh and NeuS side by side on the same views (time, Chamfer
+  distance, file size) and publish the table.
 
 ## References
 
@@ -348,6 +418,10 @@ All settings are environment variables (`app/core/config.py` has the full list).
 - Gropp et al., *Implicit Geometric Regularization for Learning Shapes*, ICML 2020.
 - Mildenhall et al., *NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis*, ECCV 2020.
 - Lorensen & Cline, *Marching Cubes: A High Resolution 3D Surface Construction Algorithm*, SIGGRAPH 1987.
+- Hong et al., *LRM: Large Reconstruction Model for Single Image to 3D*, ICLR 2024.
+- Shen et al., *Flexible Isosurface Extraction for Gradient-Based Mesh Optimization* (FlexiCubes), SIGGRAPH 2023.
+- Taubin, *A Signal Processing Approach to Fair Surface Design*, SIGGRAPH 1995.
+- Garland & Heckbert, *Surface Simplification Using Quadric Error Metrics*, SIGGRAPH 1997.
 - Qin et al., *U²-Net: Going Deeper with Nested U-Structure for Salient Object Detection*, Pattern Recognition 2020.
 - Kerbl et al., *3D Gaussian Splatting for Real-Time Radiance Field Rendering*, SIGGRAPH 2023.
 - Xu et al., *InstantMesh: Efficient 3D Mesh Generation from a Single Image with Sparse-view Large Reconstruction Models*, 2024.

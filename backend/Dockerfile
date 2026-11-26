@@ -1,7 +1,7 @@
 # One Dockerfile, three images (build with --target):
 #   api         FastAPI gateway, no ML dependencies (~500 MB vs several GB)
 #   worker-cpu  worker with the mock model, for laptops and CI
-#   worker-gpu  worker with Zero123++ + NeuS; weights baked in (BAKE_WEIGHTS=1)
+#   worker-gpu  worker with Zero123++ + InstantMesh/NeuS; weights baked in (BAKE_WEIGHTS=1)
 #
 # The PyPI torch wheel bundles CUDA 12.1, so a slim Python base works on any
 # host with an NVIDIA driver and the NVIDIA container toolkit.
@@ -44,10 +44,17 @@ FROM base AS worker-gpu
 ARG BAKE_WEIGHTS=1
 COPY requirements/api.txt requirements/worker-cpu.txt requirements/worker-gpu.txt requirements/
 RUN pip install -r requirements/worker-gpu.txt
-ENV HF_HOME=/opt/models/hf U2NET_HOME=/opt/models/u2net MODEL_BACKEND=multiview
-RUN mkdir -p /opt/models && if [ "$BAKE_WEIGHTS" = "1" ]; then \
+ENV HF_HOME=/opt/models/hf U2NET_HOME=/opt/models/u2net XDG_CACHE_HOME=/opt/models/cache MODEL_BACKEND=multiview
+# Just the downloader, so code edits do not invalidate the (large) weights layer.
+COPY app/__init__.py app/
+COPY app/pipeline/__init__.py app/pipeline/instantmesh.py app/pipeline/
+# InstantMesh's model code (pinned commit) is always baked in; weights only with BAKE_WEIGHTS=1.
+RUN mkdir -p /opt/models && python -c "from app.pipeline.instantmesh import ensure_source; ensure_source()" \
+    && if [ "$BAKE_WEIGHTS" = "1" ]; then \
         python -c "import rembg; rembg.new_session('u2net')" \
-        && python -c "from huggingface_hub import snapshot_download as d; d('sudo-ai/zero123plus-v1.2'); d('sudo-ai/zero123plus-pipeline')" ; \
+        && python -c "from huggingface_hub import snapshot_download as d, hf_hub_download as f; \
+d('sudo-ai/zero123plus-v1.2'); d('sudo-ai/zero123plus-pipeline'); d('facebook/dino-vitb16'); \
+f('TencentARC/InstantMesh', 'instant_mesh_large.ckpt'); f('TencentARC/InstantMesh', 'diffusion_pytorch_model.bin')" ; \
     fi && chown -R app /opt/models
 COPY alembic.ini ./
 COPY app ./app

@@ -188,3 +188,22 @@ def test_short_env_names_for_defaults(monkeypatch):
     s = Settings()
     assert s.default_diffusion_steps == 28 and s.default_recon_iters == 800
     assert Settings(default_diffusion_steps=40).default_diffusion_steps == 40
+
+
+def test_reconstructor_and_quality_fields(client):
+    assert submit(client, reconstructor="magic").json()["code"] == "validation_error"
+    assert submit(client, texture_size="64").json()["code"] == "validation_error"
+    for method in ("instantmesh", "neus"):
+        r = submit(client, reconstructor=method, texture="false", target_faces="0")
+        assert r.status_code == 202
+        assert wait_for(client, r.json()["job_id"])["status"] == "succeeded"
+
+
+def test_quality_defaults_come_from_the_environment(monkeypatch):
+    from app.core.config import Settings
+
+    monkeypatch.setenv("RECONSTRUCTOR", "neus")
+    monkeypatch.setenv("TARGET_FACES", "20000")
+    s = Settings()
+    assert s.default_reconstructor == "neus" and s.default_target_faces == 20000
+    assert s.zero123pp_unet == "instantmesh" and s.default_texture_size == 1024

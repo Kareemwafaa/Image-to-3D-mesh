@@ -10,6 +10,10 @@ The input image conditions the model twice: through CLIP image embeddings
 (global semantics, via cross-attention) and through "reference attention",
 where the UNet's own features for the noised input image are concatenated
 into the self-attention keys/values (fine appearance detail).
+
+InstantMesh's authors fine-tuned the Zero123++ UNet to draw the views on a
+white background (the background its reconstruction model was trained on).
+`unet="instantmesh"` swaps in those weights; "original" keeps sudo-ai's gray.
 """
 
 from __future__ import annotations
@@ -47,10 +51,14 @@ class Zero123PlusGenerator:
         model_id: str = "sudo-ai/zero123plus-v1.2",
         pipeline_id: str = "sudo-ai/zero123plus-pipeline",
         device: str = "cuda",
+        unet: str = "original",
     ) -> None:
+        if unet not in ("original", "instantmesh"):
+            raise ValueError(f"unet must be 'original' or 'instantmesh', not {unet!r}")
         self.model_id = model_id
         self.pipeline_id = pipeline_id
         self.device = device
+        self.unet = unet
         self.pipe = None
 
     def load(self) -> None:
@@ -64,6 +72,14 @@ class Zero123PlusGenerator:
         pipe = DiffusionPipeline.from_pretrained(self.model_id, custom_pipeline=self.pipeline_id, torch_dtype=dtype)
         # Settings recommended by the Zero123++ authors.
         pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing")
+        if self.unet == "instantmesh":
+            from huggingface_hub import hf_hub_download
+
+            from .instantmesh import INSTANTMESH_REPO, WHITE_BG_UNET_FILE
+
+            path = hf_hub_download(INSTANTMESH_REPO, WHITE_BG_UNET_FILE)
+            log.info("Using InstantMesh's white-background UNet (%s)", path)
+            pipe.unet.load_state_dict(torch.load(path, map_location="cpu", weights_only=True), strict=True)
         pipe.to(self.device)
         pipe.set_progress_bar_config(disable=True)
         self.pipe = pipe

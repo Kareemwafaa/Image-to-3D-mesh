@@ -29,8 +29,12 @@ export interface Job {
   createdAt: number | null;
 }
 
+/** How the generated views become a mesh. */
+export type Reconstructor = 'instantmesh' | 'neus';
+
 export interface GenerateOptions {
   removeBackground: boolean;
+  reconstructor?: Reconstructor;
   /** Marching-cubes grid resolution; higher is more detailed and slower. */
   resolution?: number;
 }
@@ -128,6 +132,7 @@ export class ApiService {
     const form = new FormData();
     form.append('image', image);
     form.append('remove_background', String(opts.removeBackground));
+    if (opts.reconstructor) form.append('reconstructor', opts.reconstructor);
     if (opts.resolution) form.append('mc_resolution', String(opts.resolution));
     const res = await fetch(`${await this.apiUrl()}/generate`, { method: 'POST', body: form, signal });
     if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
