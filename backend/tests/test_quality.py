@@ -341,3 +341,31 @@ def test_instantmesh_upstream_runs_without_nvdiffrast(tmp_path, monkeypatch):
     assert out.vertices.ndim == 2 and out.vertices.shape[1] == 3 and len(out.faces) > 0
     assert out.vertex_colors.shape == (len(out.vertices), 3) and out.vertex_colors.dtype == np.uint8
     assert np.abs(out.vertices).max() <= 1.05 + 1e-3  # inside the FlexiCubes grid (scale 2.1)
+
+
+def test_chunked_geometry_matches_upstream(tmp_path):
+    """Our memory-bounded FlexiCubes head must give exactly upstream's numbers."""
+    pytest.importorskip("transformers")
+    pytest.importorskip("einops")
+    pytest.importorskip("cv2")
+    try:
+        up = instantmesh.import_upstream()
+    except OSError as exc:
+        if os.environ.get("I3D_REQUIRE_NETWORK") == "1":
+            raise
+        pytest.skip(f"could not download the InstantMesh source: {exc}")
+    import importlib
+
+    synth_mod = importlib.import_module("instantmesh_src.models.renderer.synthesizer_mesh")
+    torch.manual_seed(0)
+    synth = synth_mod.TriplaneSynthesizer(triplane_dim=8, samples_per_ray=16)
+    planes = torch.randn(1, 3, 8, 16, 16)
+    geo = up.FlexiCubesGeometry(grid_res=10, scale=2.1, renderer=None, device="cpu")
+    coords = geo.verts.unsqueeze(0)
+    with torch.no_grad():
+        expected = synth.get_geometry_prediction(planes, coords, geo.indices)
+        chunked = instantmesh.chunked_geometry_prediction(synth, up.sample_from_planes, chunk=64)
+        got = chunked(planes, coords, geo.indices)
+    for e, g in zip(expected, got, strict=True):
+        assert e.shape == g.shape
+        torch.testing.assert_close(g, e, rtol=1e-5, atol=1e-6)

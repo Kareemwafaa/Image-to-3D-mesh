@@ -26,6 +26,7 @@ def create_backend(s: Settings) -> MeshBackend:
             unet=s.zero123pp_unet,
             instantmesh_variant=s.instantmesh_variant,
             preload_instantmesh=s.preload_instantmesh,
+            low_vram=s.low_vram,
         )
     from ..backends.mock import MockBackend
 

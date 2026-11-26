@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     instantmesh_variant: Literal["large", "base"] = "large"
     # Load InstantMesh at start-up. Set false to save ~2 GB of GPU memory if you only use NeuS.
     preload_instantmesh: bool = True
+    # Move Zero123++ to CPU RAM while reconstructing. Unset = automatic (GPUs under 20 GiB).
+    low_vram: Optional[bool] = None
     default_reconstructor: Literal["instantmesh", "neus"] = Field(
         "instantmesh", validation_alias=AliasChoices("RECONSTRUCTOR", "DEFAULT_RECONSTRUCTOR")
     )

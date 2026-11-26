@@ -85,6 +85,8 @@ def start_server(python: str, port: int) -> subprocess.Popen:
     # This lets the GitHub Pages app (or anyone's copy of it) connect.
     env.setdefault("CORS_ORIGINS", "*")
     env.setdefault("PRELOAD_MODEL", "true")
+    # Lets PyTorch grow memory segments instead of fragmenting the T4's 15 GB.
+    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     cmd = server_command(python, port)
     log(f"Starting the API: {' '.join(cmd[1:])}")
     return subprocess.Popen(

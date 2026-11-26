@@ -44,7 +44,8 @@ FROM base AS worker-gpu
 ARG BAKE_WEIGHTS=1
 COPY requirements/api.txt requirements/worker-cpu.txt requirements/worker-gpu.txt requirements/
 RUN pip install -r requirements/worker-gpu.txt
-ENV HF_HOME=/opt/models/hf U2NET_HOME=/opt/models/u2net XDG_CACHE_HOME=/opt/models/cache MODEL_BACKEND=multiview
+ENV HF_HOME=/opt/models/hf U2NET_HOME=/opt/models/u2net XDG_CACHE_HOME=/opt/models/cache MODEL_BACKEND=multiview \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # Just the downloader, so code edits do not invalidate the (large) weights layer.
 COPY app/__init__.py app/
 COPY app/pipeline/__init__.py app/pipeline/instantmesh.py app/pipeline/

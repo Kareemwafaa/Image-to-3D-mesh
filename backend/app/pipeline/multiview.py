@@ -60,6 +60,7 @@ class Zero123PlusGenerator:
         self.device = device
         self.unet = unet
         self.pipe = None
+        self._offloaded = False
 
     def load(self) -> None:
         if self.pipe is not None:
@@ -90,6 +91,9 @@ class Zero123PlusGenerator:
 
         self.load()
         assert self.pipe is not None
+        if self._offloaded:
+            self.pipe.to(self.device)
+            self._offloaded = False
         generator = None
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
@@ -97,6 +101,17 @@ class Zero123PlusGenerator:
         cond = image.convert("RGBA").resize((VIEW_SIZE, VIEW_SIZE), Image.LANCZOS)
         grid = self.pipe(cond, num_inference_steps=steps, generator=generator).images[0]
         return split_grid(grid)
+
+    def offload(self) -> None:
+        """Park the weights in CPU RAM so the reconstructor has the GPU to itself.
+        The next generate() moves them back (a second or two over PCIe)."""
+        if self.pipe is None or self._offloaded or not self.device.startswith("cuda"):
+            return
+        import torch
+
+        self.pipe.to("cpu")
+        self._offloaded = True
+        torch.cuda.empty_cache()
 
 
 def views_to_arrays(views: list[Image.Image]) -> np.ndarray:

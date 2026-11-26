@@ -43,11 +43,15 @@ class MultiViewBackend:
         unet: str = "instantmesh",
         instantmesh_variant: str = "large",
         preload_instantmesh: bool = True,
+        low_vram: bool | None = None,
     ) -> None:
         self.device = resolve_device(device)
         self.generator = multiview.Zero123PlusGenerator(model_id, pipeline_id, self.device, unet=unet)
         self.instantmesh_variant = instantmesh_variant
         self.preload_instantmesh = preload_instantmesh
+        # None = decide from the GPU: under 20 GiB (a free T4 has 15), move Zero123++
+        # to CPU RAM while reconstructing.
+        self.low_vram = _small_gpu(self.device) if low_vram is None else low_vram
         self._lrm = None
 
     @property
@@ -105,6 +109,8 @@ class MultiViewBackend:
         progress(_MV[0], "multiview")
         views = self.generator.generate(image, steps=options.diffusion_steps, seed=options.seed)
         multiview.make_grid(views).save(out_dir / "views.png")
+        if self.low_vram:
+            self.generator.offload()
         t1 = time.monotonic()
 
         progress(_MV[1], "segmenting_views")
@@ -157,6 +163,17 @@ class MultiViewBackend:
 
 # Old name, kept so existing imports keep working.
 MultiViewNeuSBackend = MultiViewBackend
+
+
+def _small_gpu(device: str, threshold_gib: float = 20.0) -> bool:
+    if not device.startswith("cuda"):
+        return False
+    try:
+        import torch
+
+        return torch.cuda.get_device_properties(0).total_memory / 2**30 < threshold_gib
+    except Exception:  # pragma: no cover - no torch or no GPU
+        return False
 
 
 def _free_cuda_cache() -> None:

@@ -182,6 +182,15 @@ InstantMesh's code is not on PyPI, so `ensure_source()` downloads upstream's
 `instantmesh_src`). Upstream imports nvdiffrast, which needs a CUDA compiler;
 inference does not use it, so a stub stands in when it is missing.
 
+Upstream predicts the FlexiCubes weights from the features of every cube's 8
+corners gathered for all 128³ cubes at once: one 2.1M × 8 × 240 float tensor,
+15 GiB. That ran out of memory on the first real T4 run, so
+`chunked_geometry_prediction` replaces that step: it works through the grid in
+chunks and re-samples each chunk's corner features from the triplane instead
+of gathering them from a stored copy. The outputs are identical (tested
+against upstream). On GPUs under 20 GiB, Zero123++ is also parked in CPU RAM
+while InstantMesh runs (`LOW_VRAM`).
+
 ### 8. Cleanup and texture baking
 
 `postprocess.py`: drop floaters, close holes up to 200 edges (fan around the
@@ -229,8 +238,9 @@ shape, lumpy surface, 9.4 MB. That run is what motivated ADR 0010.
 Not run yet, because this environment has no GPU and cannot reach Hugging Face:
 
 - **InstantMesh with its real weights**, the white-background UNet, and the
-  speed and memory on a T4. GUESS: Zero123++ (fp16) plus InstantMesh-large fit
-  in 16 GB and the whole job takes under a minute. If memory runs out, set
+  speed on a T4. The first T4 run (2026-11-26) failed with out-of-memory in
+  FlexiCubes; fixed by chunking (see stage 7). GUESS: the job now fits in 15 GB
+  and takes under a minute. If memory runs out, set
   `INSTANTMESH_VARIANT=base`, or `RECONSTRUCTOR=neus PRELOAD_INSTANTMESH=false`.
 
 - **Zero123++ inference and the Modal deployment** have not been run. The code
@@ -394,6 +404,7 @@ All settings are environment variables (`app/core/config.py` has the full list).
 | `RECONSTRUCTOR`, `TEXTURE_SIZE`, `TARGET_FACES` | `instantmesh`, `1024`, `40000` | Defaults for the quality form fields |
 | `INSTANTMESH_VARIANT` | `large` | `large` or `base` (smaller, less GPU memory) |
 | `PRELOAD_INSTANTMESH` | `true` | Load InstantMesh at start-up; `false` if you only use NeuS |
+| `LOW_VRAM` | automatic | Move Zero123++ to CPU RAM while reconstructing; on by default for GPUs under 20 GiB |
 | `ZERO123PP_UNET` | `instantmesh` | `instantmesh` (white background) or `original` (sudo-ai's gray) |
 | `INSTANTMESH_SRC` | download | Use an existing checkout of InstantMesh's `src/` (renamed `instantmesh_src`) |
 
