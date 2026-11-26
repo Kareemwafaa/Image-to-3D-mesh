@@ -1,182 +1,175 @@
-"""HTTP API: upload an image, poll the job, download the .glb."""
+"""The API gateway (FastAPI app factory).
+
+`uvicorn app.main:app` serves the gateway only (full mode; workers run
+separately). `python -m app.lite` serves it with an in-process worker.
+"""
 
 from __future__ import annotations
 
-import io
-import logging
+import asyncio
+import time
+import uuid
 from contextlib import asynccontextmanager
-from typing import Callable, Optional
+from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
+import structlog
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from PIL import Image, UnidentifiedImageError
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .backends import GenerateOptions
-from .config import Settings, get_settings
-from .jobs import RESULT_FILE, VIEWS_FILE, JobManager, JobRecord, JobStatus
+from .backends.base import MeshBackend
+from .container import Container, build_container
+from .core import metrics
+from .core.config import Settings, get_settings
+from .core.errors import AppError
+from .core.logging import get_logger, setup_logging
+from .core.tracing import instrument_app, instrument_engine, setup_tracing
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = get_logger("app.gateway")
 
-# Inputs larger than this on either side are shrunk before saving; the models
-# work at 320-512 px, so bigger images only cost upload and decode time.
-MAX_SIDE = 2048
-
-
-class GenerateResponse(BaseModel):
-    job_id: str
-
-
-class JobResponse(BaseModel):
-    job_id: str
-    status: JobStatus
-    stage: Optional[str]
-    progress: float
-    result_url: Optional[str]
-    views_url: Optional[str]
-    error: Optional[str]
-    created_at: str
-    updated_at: str
+OPENAPI_TAGS = [
+    {"name": "jobs", "description": "Submit images, follow progress, download meshes."},
+    {"name": "admin", "description": "API keys, dead letters, queue state. Admin key required."},
+    {"name": "health", "description": "Liveness, readiness, metrics."},
+]
 
 
-class HealthResponse(BaseModel):
-    status: str
-    backend: str
-    model_loaded: bool
-    model_error: Optional[str]
-    queue_size: Optional[int]
-
-
-def local_manager_factory(settings: Settings) -> JobManager:
-    from .backends import create_backend
-    from .jobs import LocalJobManager
-
-    return LocalJobManager(
-        create_backend(settings), settings.data_dir, settings.job_ttl_hours, preload=settings.preload_model
-    )
+def problem(status: int, code: str, detail: str, request: Request, headers: Optional[dict] = None) -> JSONResponse:
+    """RFC 9457 problem details."""
+    body = {
+        "type": f"https://errors.image-to-3d.dev/{code}",
+        "title": code.replace("_", " ").capitalize(),
+        "status": status,
+        "code": code,
+        "detail": detail,
+        "instance": request.url.path,
+        "request_id": getattr(request.state, "request_id", None),
+    }
+    return JSONResponse(body, status_code=status, headers=headers, media_type="application/problem+json")
 
 
 def create_app(
     settings: Optional[Settings] = None,
-    manager_factory: Callable[[Settings], JobManager] = local_manager_factory,
+    container: Optional[Container] = None,
+    run_worker: Optional[bool] = None,
+    backend: Optional[MeshBackend] = None,
 ) -> FastAPI:
-    settings = settings or get_settings()
+    s = settings or get_settings()
+    setup_logging(s.log_level, s.log_json)
+    tracing_on = setup_tracing(f"{s.service_name}-api", s.otel_exporter_otlp_endpoint)
+    run_worker = s.is_lite if run_worker is None else run_worker
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        manager = manager_factory(settings)
-        manager.start()
-        app.state.jobs = manager
+        c = container or build_container(s)
+        await c.start(migrate=s.is_lite)
+        instrument_engine(c.engine)
+        app.state.container = c
+        worker_task = None
+        if run_worker:
+            from .worker.pipeline import create_backend
+            from .worker.runner import Worker
+
+            worker = Worker(c, backend or create_backend(s))
+            app.state.worker = worker
+            worker_task = asyncio.create_task(worker.run(), name="in-process-worker")
+        log.info(
+            "gateway_started", mode=s.mode, backend=s.model_backend, in_process_worker=run_worker, tracing=tracing_on
+        )
         try:
             yield
         finally:
-            manager.stop()
+            if worker_task is not None:
+                app.state.worker.stop()
+                try:
+                    await asyncio.wait_for(worker_task, timeout=30)
+                except TimeoutError:
+                    worker_task.cancel()
+            if container is None:
+                await c.close()
 
-    app = FastAPI(title="Image to 3D mesh", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(
+        title="Image to 3D mesh API",
+        version="1.0.0",
+        description="Single image to textured 3D mesh: Zero123++ multi-view diffusion + NeuS reconstruction.",
+        openapi_tags=OPENAPI_TAGS,
+        lifespan=lifespan,
+    )
+    app.state.settings = s
+
+    allow_all = s.cors_origins == ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_origins=["*"] if allow_all else s.cors_origins,
+        allow_origin_regex=s.cors_origin_regex,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        expose_headers=[
+            "Location",
+            "Retry-After",
+            "RateLimit-Limit",
+            "RateLimit-Remaining",
+            "X-Request-ID",
+            "Idempotent-Replayed",
+        ],
     )
 
-    def jobs(request: Request) -> JobManager:
-        return request.app.state.jobs
-
-    def find(request: Request, job_id: str) -> JobRecord:
-        job = jobs(request).get(job_id)
-        if job is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
-        return job
-
-    def to_response(job: JobRecord) -> JobResponse:
-        return JobResponse(
-            job_id=job.id,
-            status=job.status,
-            stage=job.stage,
-            progress=round(job.progress, 3),
-            result_url=f"/jobs/{job.id}/result" if job.status == JobStatus.succeeded else None,
-            views_url=f"/jobs/{job.id}/views" if job.has_views else None,
-            error=job.error,
-            created_at=job.created_at,
-            updated_at=job.updated_at,
-        )
-
-    @app.get("/health", response_model=HealthResponse)
-    def health(request: Request) -> HealthResponse:
-        info = jobs(request).health()
-        return HealthResponse(
-            status="ok" if not info.get("model_error") else "degraded",
-            backend=settings.backend,
-            model_loaded=bool(info.get("model_loaded")),
-            model_error=info.get("model_error"),
-            queue_size=info.get("queue_size"),
-        )
-
-    @app.post("/generate", response_model=GenerateResponse, status_code=status.HTTP_202_ACCEPTED)
-    async def generate(
-        request: Request,
-        image: UploadFile = File(..., description="PNG, JPEG or WebP image of one object"),
-        remove_background: bool = Form(True),
-        foreground_ratio: Optional[float] = Form(None, ge=0.5, le=1.0),
-        mc_resolution: Optional[int] = Form(None, ge=32, le=512),
-        diffusion_steps: Optional[int] = Form(None, ge=10, le=150),
-        recon_iters: Optional[int] = Form(None, ge=100, le=20000),
-        seed: Optional[int] = Form(None, ge=0, le=2**31 - 1),
-    ) -> GenerateResponse:
-        data = await image.read(settings.max_upload_bytes + 1)
-        if len(data) > settings.max_upload_bytes:
-            raise HTTPException(413, f"Image is larger than {settings.max_upload_mb:g} MB")
+    @app.middleware("http")
+    async def request_context(request: Request, call_next):
+        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+        request.state.request_id = request_id
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+        started = time.perf_counter()
+        status = 500
         try:
-            with Image.open(io.BytesIO(data)) as probe:
-                probe.verify()
-            pil = Image.open(io.BytesIO(data))
-            pil.load()
-        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not read the file as an image") from exc
-        if max(pil.size) > MAX_SIDE:
-            pil.thumbnail((MAX_SIDE, MAX_SIDE))
+            response = await call_next(request)
+            status = response.status_code
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            route = request.scope.get("route")
+            path = getattr(route, "path", "unmatched")
+            elapsed = time.perf_counter() - started
+            if s.metrics_enabled and path not in ("/metrics",):
+                metrics.HTTP_REQUESTS.labels(request.method, path, str(status)).inc()
+                metrics.HTTP_LATENCY.labels(request.method, path).observe(elapsed)
+            if path not in ("/metrics", "/healthz", "/readyz", "/health"):
+                log.info("http_request", method=request.method, path=path, status=status, ms=round(elapsed * 1000, 1))
 
-        options = GenerateOptions(
-            remove_background=remove_background,
-            foreground_ratio=foreground_ratio or settings.default_foreground_ratio,
-            mc_resolution=mc_resolution or settings.default_mc_resolution,
-            diffusion_steps=diffusion_steps or settings.default_diffusion_steps,
-            recon_iters=recon_iters or settings.default_recon_iters,
-            seed=seed,
-        )
-        job = jobs(request).submit(pil, options)
-        return GenerateResponse(job_id=job.id)
+    @app.exception_handler(AppError)
+    async def _app_error(request: Request, exc: AppError):
+        return problem(exc.status, exc.code, exc.detail, request, exc.headers)
 
-    @app.get("/jobs/{job_id}", response_model=JobResponse)
-    def get_job(job_id: str, request: Request) -> JobResponse:
-        return to_response(find(request, job_id))
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_error(request: Request, exc: StarletteHTTPException):
+        code = {404: "not_found", 405: "method_not_allowed"}.get(exc.status_code, "http_error")
+        return problem(exc.status_code, code, str(exc.detail), request)
 
-    @app.get("/jobs/{job_id}/result", response_class=StreamingResponse)
-    def get_result(job_id: str, request: Request) -> StreamingResponse:
-        job = find(request, job_id)
-        if job.status == JobStatus.failed:
-            raise HTTPException(status.HTTP_409_CONFLICT, f"Job failed: {job.error}")
-        data = jobs(request).read_file(job_id, RESULT_FILE) if job.status == JobStatus.succeeded else None
-        if data is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Mesh is not ready yet")
-        return StreamingResponse(
-            data,
-            media_type="model/gltf-binary",
-            headers={"Content-Disposition": f'attachment; filename="{job_id}.glb"'},
-        )
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(request: Request, exc: RequestValidationError):
+        detail = "; ".join(f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}" for e in exc.errors())
+        return problem(422, "validation_error", detail, request)
 
-    @app.get("/jobs/{job_id}/views", response_class=StreamingResponse)
-    def get_views(job_id: str, request: Request) -> StreamingResponse:
-        """The six generated views as one 3x2 PNG (multiview backend only)."""
-        find(request, job_id)
-        data = jobs(request).read_file(job_id, VIEWS_FILE)
-        if data is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "No views for this job (yet)")
-        return StreamingResponse(data, media_type="image/png")
+    @app.exception_handler(Exception)
+    async def _unhandled(request: Request, exc: Exception):
+        log.exception("unhandled_error")
+        return problem(500, "internal_error", "Internal server error.", request)
 
+    from .api import routes_admin, routes_health, routes_jobs
+
+    app.include_router(routes_health.router)
+    app.include_router(routes_jobs.router)
+    app.include_router(routes_admin.router)
+    instrument_app(app)
     return app
 
 
-app = create_app()
+def __getattr__(name: str):
+    # `uvicorn app.main:app` builds the app lazily, so importing this module
+    # (tests, tools) has no side effects.
+    if name == "app":
+        return create_app()
+    raise AttributeError(name)

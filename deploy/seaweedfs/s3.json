@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "image-to-3d",
+      "credentials": [{ "accessKey": "i3d-access-key", "secretKey": "i3d-secret-key-change-me" }],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+# Worker with the mock model (CPU only): compose's `cpu` profile and CI.
+-r api.txt
+trimesh>=4.0.5
+rembg[cpu]>=2.0.57

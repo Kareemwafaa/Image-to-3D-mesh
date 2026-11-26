@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 import numpy as np
 import torch
@@ -58,7 +58,7 @@ class ReconConfig:
 
 def build_rays(cameras: list[Camera], views: np.ndarray, masks: np.ndarray, background: float, device):
     """Flatten every pixel of every view into one table of rays and targets."""
-    origins, dirs = zip(*(cam.rays(device) for cam in cameras))
+    origins, dirs = zip(*(cam.rays(device) for cam in cameras), strict=True)
     rays_o = torch.cat(origins)
     rays_d = torch.cat(dirs)
     rgb = torch.from_numpy(views).float().reshape(-1, 3).to(device)
@@ -105,7 +105,7 @@ def reconstruct(
         )
         cos_anneal = min(frac / max(cfg.anneal_end, 1e-6), 1.0)
         scale = cosine_lr(step, cfg.iters)
-        for g, base in zip(opt.param_groups, base_lrs):
+        for g, base in zip(opt.param_groups, base_lrs, strict=True):
             g["lr"] = base * scale
 
         idx = torch.randint(0, n_rays, (cfg.batch_rays,), device=device)
@@ -136,8 +136,16 @@ def reconstruct(
             psnr = -10 * torch.log10(((out.rgb - target[idx]) ** 2).mean().clamp(min=1e-10))
             log.info(
                 "recon %d/%d loss=%.4f rgb=%.4f mask=%.4f eik=%.4f psnr=%.2f s=%.1f levels=%d (%.0fs)",
-                step, cfg.iters, loss.item(), loss_rgb.item(), loss_mask.item(), loss_eik.item(),
-                psnr.item(), model.inv_s().item(), encoding.active_levels, time.monotonic() - started,
+                step,
+                cfg.iters,
+                loss.item(),
+                loss_rgb.item(),
+                loss_mask.item(),
+                loss_eik.item(),
+                psnr.item(),
+                model.inv_s().item(),
+                encoding.active_levels,
+                time.monotonic() - started,
             )
             if progress:
                 progress(frac)

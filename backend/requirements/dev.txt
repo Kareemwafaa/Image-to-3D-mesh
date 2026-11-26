@@ -1,0 +1,8 @@
+# Tests and linting. The pipeline tests also need torch; CI installs the CPU wheel.
+-r worker-cpu.txt
+scikit-image>=0.22
+pytest>=8
+pytest-asyncio>=0.24
+httpx>=0.27
+fakeredis[lua]>=2.23
+ruff==0.17.6                 # pinned so `ruff format --check` is stable

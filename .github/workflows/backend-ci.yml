@@ -1,0 +1,114 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", "deploy/**", "docker-compose.yml", ".github/workflows/backend-ci.yml"]
+  pull_request:
+    paths: ["backend/**", "deploy/**", "docker-compose.yml", ".github/workflows/backend-ci.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: backend
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  # The NeuS tests run on CPU; the CPU wheel is 200 MB instead of 2.5 GB.
+  TORCH_CPU: torch==2.4.1 --index-url https://download.pytorch.org/whl/cpu
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install ruff==0.17.6
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    name: Unit, API and pipeline tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements/*.txt
+      - run: pip install $TORCH_CPU
+      - run: pip install -r requirements/dev.txt
+      - name: pytest (lite mode, fakeredis, CPU NeuS)
+        run: pytest -m "not integration" -q --durations=10
+
+  integration:
+    name: Integration (Postgres, Redis, S3)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: i3d, POSTGRES_PASSWORD: i3d, POSTGRES_DB: i3d }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U i3d" --health-interval 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
+    env:
+      I3D_IT_DATABASE_URL: postgresql+asyncpg://i3d:i3d@localhost:5432/i3d
+      I3D_IT_REDIS_URL: redis://localhost:6379/15
+      I3D_IT_S3_ENDPOINT: http://localhost:8333
+      I3D_IT_S3_ACCESS_KEY: i3d-access-key
+      I3D_IT_S3_SECRET_KEY: i3d-secret-key-change-me
+    steps:
+      - uses: actions/checkout@v4
+      # Service containers cannot take a command or mount repo files, so the
+      # S3 server (SeaweedFS, as in docker-compose.yml) starts here.
+      - name: Start S3 (SeaweedFS)
+        working-directory: .
+        run: |
+          docker run -d --name s3 -p 8333:8333 \
+            -v "$PWD/deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro" \
+            chrislusf/seaweedfs:4.50 server -dir=/data -volume.max=0 -master.volumeSizeLimitMB=1024 \
+              -s3 -s3.config=/etc/seaweedfs/s3.json
+          for i in $(seq 60); do curl -fs http://localhost:8333/healthz && break; sleep 1; done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements/*.txt
+      - run: pip install -r requirements/dev.txt
+      - name: pytest -m integration
+        run: pytest -m integration -q -rs
+
+  compose:
+    name: Docker images and compose smoke test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+      - name: Build and start the stack (CPU profile, mock model)
+        run: docker compose --profile cpu up -d --build
+      - name: Submit a job end to end
+        run: bash deploy/smoke_test.sh http://localhost:8000
+      - name: Scale to three workers and run again
+        run: |
+          docker compose --profile cpu up -d --scale worker-cpu=3
+          bash deploy/smoke_test.sh http://localhost:8000
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile cpu logs --no-color --tail 200
+      - run: docker compose --profile cpu down -v
+        if: always()

@@ -25,8 +25,12 @@ flowchart LR
 | 5 | `app/pipeline/reconstruct.py` | Per-object optimisation with RGB, silhouette and Eikonal losses |
 | 6 | `app/pipeline/meshing.py` | Marching cubes, floater removal, vertex colours, glTF export |
 
-The web API (`app/main.py`) and job queue (`app/jobs.py`) wrap the pipeline;
-`modal_app.py` deploys it on [Modal](https://modal.com) GPUs.
+Around the pipeline sits a small distributed system: a FastAPI gateway, a
+Redis Streams job queue, GPU workers, Postgres and S3 storage, with retries,
+dead letters, idempotency, rate limits, live progress (SSE), metrics and
+traces. It also runs as one process on a free notebook GPU. The design, the
+failure handling and the decision records (ADRs) are in
+[docs/architecture](../docs/architecture/README.md).
 
 ## The theory, stage by stage
 
@@ -155,12 +159,12 @@ Feed-forward reconstructors (TripoSR, LRM, InstantMesh's LRM) answer in about
 a second, but are limited to what one network pass can represent. The
 optimisation-based second stage here is slower (minutes) but its result is
 fitted to the specific object, is easy to inspect (you can see the six views
-it was fitted to), and each stage is replaceable. TripoSR is kept as a
-baseline (`MODEL_BACKEND=triposr`) for comparisons.
+it was fitted to), and each stage is replaceable.
 
 ## What has been verified, and what are guesses
 
-Verified here (CPU, see `tests/`): the API end to end with a mock model; the
+Verified here (CPU, see `tests/`): the API and the whole job system end to end
+with a mock model, in lite mode and against real Postgres, Redis and S3; the
 camera geometry; the NeuS renderer, optimiser and mesher, which recover
 synthetic scenes rendered from the six Zero123++ cameras (an off-centre sphere
 in the test suite; two coloured spheres at 64 px and 400 steps reached a mean
@@ -183,17 +187,19 @@ Not run yet, because this environment has no GPU and cannot reach Hugging Face:
 
 ## API
 
+Interactive docs are served at `/docs`. The full route list is in
+[docs/architecture](../docs/architecture/README.md#api).
+
 | Method | Path | What it does |
 | --- | --- | --- |
-| `POST` | `/generate` | Multipart upload. Returns `202 {"job_id": "..."}` |
-| `GET` | `/jobs/{job_id}` | Job status (see below) |
-| `GET` | `/jobs/{job_id}/result` | The mesh, `model/gltf-binary`. 404 until ready, 409 if the job failed |
-| `GET` | `/jobs/{job_id}/views` | The six generated views as one 3×2 PNG, once stage 2 is done |
-| `GET` | `/health` | Backend name, model status, queue size |
+| `POST` | `/v1/jobs` (alias `/generate`) | Multipart upload. `202` with the job id and `Location`. Honours `Idempotency-Key` |
+| `GET` | `/v1/jobs/{id}` (alias `/jobs/{id}`) | Job status (see below) |
+| `GET` | `/v1/jobs/{id}/events` | Live progress as Server-Sent Events |
+| `GET` | `/v1/jobs/{id}/result` | The mesh, `model/gltf-binary`. 404 until ready, 409 if the job failed |
+| `GET` | `/v1/jobs/{id}/views` | The six generated views as one 3×2 PNG |
+| `GET` | `/health`, `/readyz`, `/metrics` | Status, readiness, Prometheus metrics |
 
-Interactive docs are served at `/docs`.
-
-`POST /generate` form fields (all optional except `image`):
+`POST /v1/jobs` form fields (all optional except `image`):
 
 | Field | Default | Range | Notes |
 | --- | --- | --- | --- |
@@ -205,7 +211,7 @@ Interactive docs are served at `/docs`.
 | `recon_iters` | `2500` | 100 to 20000 | NeuS optimisation steps |
 | `seed` | random | | Fix it for reproducible views |
 
-`GET /jobs/{job_id}`:
+`GET /v1/jobs/{id}`:
 
 ```json
 {
@@ -213,45 +219,78 @@ Interactive docs are served at `/docs`.
   "status": "running",
   "stage": "reconstructing",
   "progress": 0.62,
+  "attempts": 1,
   "result_url": null,
-  "views_url": "/jobs/3f2c.../views",
+  "views_url": "/v1/jobs/3f2c.../views",
+  "events_url": "/v1/jobs/3f2c.../events",
   "error": null,
-  "created_at": "2026-11-25T19:00:00+00:00",
-  "updated_at": "2026-11-25T19:01:10+00:00"
+  "error_code": null,
+  "dead_lettered": false,
+  "created_at": "2026-11-25T19:00:00Z",
+  "updated_at": "2026-11-25T19:01:10Z"
 }
 ```
 
 `status` is `queued`, `running`, `succeeded` or `failed`. `stage` is
 `segmenting`, `multiview`, `segmenting_views`, `reconstructing`, `meshing`,
-then `done`. URLs are relative to the API's base URL.
+then `done`. A failed job has a stable `error_code` (for example
+`no_foreground`, `timeout`, `gpu_oom`). Errors are `application/problem+json`.
 
 ```bash
-JOB=$(curl -s -F image=@chair.jpg $API/generate | jq -r .job_id)
-curl -s $API/jobs/$JOB
-curl -o chair.glb $API/jobs/$JOB/result
+JOB=$(curl -s -H "Idempotency-Key: chair-1" -F image=@chair.jpg $API/v1/jobs | jq -r .job_id)
+curl -N $API/v1/jobs/$JOB/events          # live progress
+curl -o chair.glb $API/v1/jobs/$JOB/result
 ```
 
 ## Run it
 
 ### Development, no GPU
 
-The `mock` backend returns a coloured cube, so the API and frontend can be
-built anywhere.
+Lite mode runs everything in one process (SQLite, local files, in-memory
+queue, in-process worker). The `mock` model returns a coloured cube, so the
+API and the frontend can be built on any laptop.
 
 ```bash
 cd backend
 python -m venv .venv && . .venv/bin/activate
-pip install -r requirements-dev.txt
-MODEL_BACKEND=mock uvicorn app.main:app --reload
-pytest            # ~1-2 min; the NeuS test trains a tiny model on CPU
+pip install -r requirements/dev.txt
+MODEL_BACKEND=mock python -m app.lite      # http://localhost:8000/docs
+pytest -m "not integration"                # ~1-2 min; one test trains a tiny NeuS on CPU
 ```
 
 ### Free GPU: Colab or Kaggle notebook
 
 The easiest way to run the real pipeline. The notebook in
 [`notebooks/facet_backend.ipynb`](../notebooks/facet_backend.ipynb) installs a pinned environment
-(`scripts/setup_gpu_env.sh`), starts the API on the free T4 and exposes it through a Cloudflare quick
-tunnel (`scripts/serve_public.py`).
+(`scripts/setup_gpu_env.sh`), starts the API in lite mode on the free T4 and exposes it through a
+Cloudflare quick tunnel (`scripts/serve_public.py`).
+
+### The full stack (Docker Compose)
+
+From the repository root:
+
+```bash
+docker compose --profile cpu up --build                 # mock model, any machine
+docker compose --profile gpu up --build                 # real pipeline, NVIDIA GPU (~12 GB)
+docker compose --profile cpu up --scale worker-cpu=3    # more workers
+OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 \
+  docker compose --profile cpu --profile observability up --build
+```
+
+This starts Postgres, Redis, an S3 server (SeaweedFS), a migration job, the API
+gateway on port 8000 and the workers. The `observability` profile adds
+Prometheus (9090), Grafana (3001, dashboard provisioned) and Jaeger (16686).
+`bash deploy/smoke_test.sh` submits a job end to end. The default admin key is
+`i3d_00000000_dev-admin-key-change-me`; set `ADMIN_API_KEY` for anything public.
+
+Integration tests run against the same services:
+
+```bash
+docker compose up -d postgres redis s3
+I3D_IT_DATABASE_URL=postgresql+asyncpg://i3d:i3d@localhost:5432/i3d \
+I3D_IT_REDIS_URL=redis://localhost:6379/15 I3D_IT_S3_ENDPOINT=http://localhost:8333 \
+  pytest -m integration
+```
 
 ### Deploy on Modal (optional)
 
@@ -261,41 +300,37 @@ cd backend
 CORS_ORIGINS=https://your-frontend.example modal deploy modal_app.py
 ```
 
-This creates a CPU web endpoint for the API and a GPU class (`MeshWorker`, A10G
-by default) that scales to zero when idle, with Zero123++ and U²-Net weights
-baked into its image. Job state lives in a `modal.Dict` and files in a
-`modal.Volume`; a scheduled function deletes jobs after 24 hours. Settings at
-deploy time: `MODAL_GPU` (e.g. `L4`, `A100`), `MODAL_MAX_GPUS` (cost cap,
-default 2), `CORS_ORIGINS`, `JOB_TTL_HOURS`.
-Use `modal serve modal_app.py` for a live-reloading dev deployment.
+One GPU container (A10G by default; set `MODAL_GPU` to change it) runs lite
+mode with the weights baked into its image, and scales to zero after 5 idle
+minutes. Job history lives in the container, so it is lost when it scales
+down. Use `modal serve modal_app.py` for a live-reloading dev deployment.
 
-### Your own GPU machine (Docker)
+## Configuration
 
-```bash
-docker build -t image-to-3d-api backend/
-docker run --gpus all -p 8000:8000 -v $PWD/data:/data image-to-3d-api
-```
-
-Here jobs run in a thread inside the API process, one at a time.
-
-## Configuration (local and Docker)
+All settings are environment variables (`app/core/config.py` has the full list).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MODEL_BACKEND` | `multiview` | `multiview`, `triposr` (baseline) or `mock` |
-| `DEVICE` | `auto` | `cuda`, `cpu` or `auto` |
-| `CORS_ORIGINS` | `http://localhost:3000,http://localhost:4200` | Comma-separated allowed origins, or `*` for any (the API uses no cookies) |
-| `DATA_DIR` | `./data` | Where inputs, views and meshes are stored |
-| `MAX_UPLOAD_MB` | `10` | Upload limit |
-| `JOB_TTL_HOURS` | `24` | Finished jobs are deleted after this; `0` keeps them |
-| `PRELOAD_MODEL` | `true` | Load models at start-up instead of on the first job |
+| `MODE` | `full` | `full` (separate workers) or `lite` (one process; `python -m app.lite` sets it) |
+| `MODEL_BACKEND` | `multiview` | `multiview` or `mock` |
+| `DATABASE_URL` | Postgres on localhost | SQLAlchemy URL; lite mode uses SQLite |
+| `REDIS_URL` | `redis://localhost:6379/0` | Queue, events and rate limits (full mode) |
+| `STORAGE_BACKEND`, `S3_*` | `s3` | `s3` (any S3-compatible store) or `local` |
+| `AUTH_MODE` | `optional` | `optional` (anonymous allowed, per-IP limits) or `required` |
+| `ADMIN_API_KEY` | none | Bootstrap admin key, `i3d_<8 hex>_<secret>` |
+| `CORS_ORIGINS`, `CORS_ORIGIN_REGEX` | localhost | Allowed origins, comma-separated, or `*` |
+| `MAX_ATTEMPTS`, `JOB_TIMEOUT_S` | `3`, `900` | Retries for transient errors, per-job deadline |
+| `VISIBILITY_TIMEOUT_S` | `60` | Lease after which a dead worker's job is reclaimed |
+| `ANON_SUBMIT_PER_MINUTE`, `ANON_MAX_INFLIGHT` | `5`, `2` | Limits for anonymous callers (API keys get higher ones) |
+| `JOB_TTL_HOURS` | `0` | Delete job outputs after this; `0` keeps them |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | Turns tracing on |
 | `DIFFUSION_STEPS`, `RECON_ITERS`, `MC_RESOLUTION`, `FOREGROUND_RATIO` | | Defaults for the form fields above |
 
 ## Next steps worth doing
 
 - **Evaluate quantitatively.** Chamfer distance and volume IoU against ground
-  truth on Google Scanned Objects, comparing this pipeline with the TripoSR
-  baseline. This turns the project from a demo into a result.
+  truth on Google Scanned Objects, comparing this pipeline with a feed-forward
+  baseline such as TripoSR. This turns the project from a demo into a result.
 - Estimate the input view's elevation and add it as a seventh supervised view.
 - Use Zero123++'s normal-generation ControlNet for normal supervision and
   cleaner masks.

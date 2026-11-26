@@ -5,8 +5,6 @@ Zero123++ cameras and checks that NeuS + marching cubes recovers it. torch and
 scikit-image are needed; the test is skipped without them.
 """
 
-import io
-
 import numpy as np
 import pytest
 from PIL import Image
@@ -14,10 +12,6 @@ from PIL import Image
 torch = pytest.importorskip("torch")
 pytest.importorskip("skimage")
 
-from app.backends import GenerateOptions  # noqa: E402
-from app.backends.mock import MockBackend  # noqa: E402
-from app.jobs import JobStatus, execute_job  # noqa: E402
-from app.modal_jobs import ModalJobManager  # noqa: E402
 from app.pipeline import cameras, multiview  # noqa: E402
 from app.pipeline.meshing import extract_mesh, zup_to_gltf  # noqa: E402
 from app.pipeline.neus import FieldConfig, NeuSModel, ray_box, sample_pdf  # noqa: E402
@@ -27,7 +21,7 @@ from app.pipeline.reconstruct import ReconConfig, reconstruct  # noqa: E402
 def test_zero123pp_cameras_look_at_origin():
     cams = cameras.zero123pp_cameras(32)
     assert len(cams) == 6
-    for cam, az, el in zip(cams, cameras.ZERO123PP_AZIMUTHS, cameras.ZERO123PP_ELEVATIONS):
+    for cam, el in zip(cams, cameras.ZERO123PP_ELEVATIONS, strict=True):
         pos = cam.c2w[:3, 3]
         assert torch.isclose(pos.norm(), torch.tensor(cameras.ZERO123PP_RADIUS))
         assert np.isclose(np.degrees(np.arcsin(pos[2].item() / pos.norm().item())), el, atol=1e-4)
@@ -88,6 +82,7 @@ def _render_sphere(cam, centre, radius, colour):
     return rgb.view(n, n, 3).numpy(), hit.float().view(n, n).numpy()
 
 
+@pytest.mark.slow
 def test_neus_recovers_a_sphere():
     """Fit an off-centre sphere (the field starts as a centred one) from the six views."""
     centre, radius = (0.15, -0.1, 0.05), 0.6
@@ -96,7 +91,11 @@ def test_neus_recovers_a_sphere():
     views = np.stack([v for v, _ in rendered])
     masks = np.stack([m for _, m in rendered])
     cfg = ReconConfig(
-        iters=150, batch_rays=256, n_samples=24, n_importance=16, log_every=1000,
+        iters=150,
+        batch_rays=256,
+        n_samples=24,
+        n_importance=16,
+        log_every=1000,
         field=FieldConfig(levels=3, base_res=8, max_res=32),
     )
     model = reconstruct(views, masks, cams, cfg, device="cpu")
@@ -106,50 +105,3 @@ def test_neus_recovers_a_sphere():
     assert dist.mean() < 0.08, dist.mean()
     colours = mesh.visual.vertex_colors[:, :3].mean(axis=0) / 255
     assert colours[0] > colours[2] + 0.2  # reddish, learned from the views
-
-
-class FakeVolume:
-    def __init__(self):
-        self.files = {}
-
-    def read_file(self, path):
-        if path not in self.files:
-            raise FileNotFoundError(path)
-        yield self.files[path]
-
-
-def test_modal_job_manager_flow(tmp_path):
-    jobs, volume = {}, FakeVolume()
-
-    def spawn(job_id, png, options):  # what MeshWorker.run does, minus Modal
-        job_dir = tmp_path / job_id
-        job_dir.mkdir()
-        (job_dir / "input.png").write_bytes(png)
-
-        def update(**fields):
-            jobs[job_id] = {**jobs[job_id], **{k: (v.value if isinstance(v, JobStatus) else v) for k, v in fields.items()}}
-
-        execute_job(MockBackend(), job_dir, GenerateOptions.from_dict(options), update)
-        for f in job_dir.iterdir():
-            volume.files[f"jobs/{job_id}/{f.name}"] = f.read_bytes()
-
-    manager = ModalJobManager(jobs, volume, spawn)
-    img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
-    img.paste((255, 0, 0, 255), (8, 8, 24, 24))
-    job = manager.submit(img, GenerateOptions(remove_background=False))
-    record = manager.get(job.id)
-    assert record.status == JobStatus.succeeded and record.has_views
-    glb = b"".join(manager.read_file(job.id, "result.glb"))
-    assert glb[:4] == b"glTF"
-    assert manager.read_file(job.id, "missing.png") is None
-    assert manager.get("nope") is None
-
-
-def test_modal_job_manager_spawn_failure():
-    def spawn(*_):
-        raise RuntimeError("no GPUs")
-
-    manager = ModalJobManager({}, FakeVolume(), spawn)
-    job = manager.submit(Image.new("RGB", (8, 8)), GenerateOptions())
-    assert manager.get(job.id).status == JobStatus.failed
-    assert "no GPUs" in manager.get(job.id).error
