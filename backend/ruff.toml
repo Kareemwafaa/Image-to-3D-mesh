@@ -1,0 +1,17 @@
+line-length = 120
+target-version = "py311"
+extend-exclude = ["data"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC"]
+ignore = [
+    "B008",    # FastAPI's Depends(...) in default arguments is the idiom
+    "UP007",   # keep Optional[...] for readability alongside pydantic
+    "UP045",
+    "UP042",   # str + Enum keeps SQLAlchemy and pydantic happy on 3.11
+    "ASYNC109", # queue/bus APIs take an explicit timeout on purpose
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["B011"]
+"app/db/migrations/versions/*" = ["E501", "I001", "UP"]

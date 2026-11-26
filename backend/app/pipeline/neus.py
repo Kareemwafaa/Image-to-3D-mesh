@@ -271,9 +271,7 @@ def render_rays(
     # value and the directional derivative; the "cos anneal" blends from a
     # smoothed estimate (helps early training) to the exact one.
     true_cos = (dirs * grads).sum(-1, keepdim=True)
-    iter_cos = -(
-        F.relu(-true_cos * 0.5 + 0.5) * (1.0 - cos_anneal_ratio) + F.relu(-true_cos) * cos_anneal_ratio
-    )
+    iter_cos = -(F.relu(-true_cos * 0.5 + 0.5) * (1.0 - cos_anneal_ratio) + F.relu(-true_cos) * cos_anneal_ratio)
     d = dists.reshape(-1, 1)
     # iter_cos <= 0 when entering a surface, so prev > next and alpha > 0.
     alpha = _section_alpha(sdf - iter_cos * d * 0.5, sdf + iter_cos * d * 0.5, model.inv_s())

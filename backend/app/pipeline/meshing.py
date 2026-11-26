@@ -20,11 +20,8 @@ import torch.nn.functional as F
 import trimesh
 from skimage import measure
 
+from .errors import MeshingError
 from .neus import NeuSModel
-
-
-class MeshingError(Exception):
-    pass
 
 
 @torch.no_grad()
