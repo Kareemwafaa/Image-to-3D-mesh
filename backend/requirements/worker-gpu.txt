@@ -1,6 +1,7 @@
 # GPU worker: the Zero123++ + NeuS pipeline.
 -r worker-cpu.txt
 torch==2.4.1                 # the PyPI wheel bundles CUDA 12.1
+torchvision==0.19.1          # the release built for torch 2.4.1; the Zero123++ pipeline imports it
 diffusers==0.20.2            # the Zero123++ custom pipeline targets this version
 transformers==4.35.2         # 4.35.0 conflicts with huggingface-hub>=0.19
 huggingface-hub>=0.19,<0.26  # diffusers 0.20 uses APIs removed in 0.26
