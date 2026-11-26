@@ -36,8 +36,11 @@ fi
 echo "==> Installing $(realpath --relative-to="$ROOT" "$REQ")"
 uv pip install --quiet --python "$ENV_DIR/bin/python" -r "$REQ" "uvicorn[standard]>=0.30" "${OVERRIDES[@]}"
 
-"$ENV_DIR/bin/python" - <<'PY'
-import torch
-gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none"
-print(f"==> Ready: torch {torch.__version__}, GPU: {gpu}")
-PY
+# Check every import each pipeline stage needs, the GPU, and fetch InstantMesh's
+# model code, so a missing package fails here and not after a 5 GB download.
+echo "==> Checking the environment"
+if [[ -f "$ROOT/backend/app/doctor.py" ]]; then
+  (cd "$ROOT/backend" && "$ENV_DIR/bin/python" -m app.doctor --fetch ${FACET_DOCTOR_ARGS:-})
+else
+  "$ENV_DIR/bin/python" -c "import torch; print('==> Ready: torch', torch.__version__)"
+fi

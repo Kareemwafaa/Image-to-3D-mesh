@@ -17,19 +17,21 @@ served by a production-style API, with a web app to drive it.
 ## What it does
 
 You upload a photo of a single object. Facet removes the background, asks a diffusion model to
-imagine the object from six new viewpoints, fits a neural surface to those views by volume
-rendering, and extracts a watertight, vertex-coloured mesh you can open in Blender, Unity or a
-browser (`.glb`).
+imagine the object from six new viewpoints, reconstructs a 3D surface from those views, cleans it up
+and paints it with a texture projected from the views. The result is a compact, textured mesh you can
+open in Blender, Unity or a browser (`.glb`).
 
 ```mermaid
 flowchart LR
     A[Photo] --> B["Segmentation<br/>U²-Net"]
     B --> C["Multi-view diffusion<br/>Zero123++ v1.2"]
-    C -->|6 posed views| D["Silhouettes<br/>U²-Net"]
-    C -->|6 posed views| E
-    D --> E["Neural SDF fit<br/>NeuS volume rendering"]
-    E --> F["Marching cubes<br/>+ vertex colour"]
-    F --> G[".glb mesh"]
+    C -->|6 posed views| E{"Reconstruction"}
+    E -->|default| F["InstantMesh<br/>sparse-view LRM + FlexiCubes"]
+    E -->|classic| G["NeuS fit<br/>+ marching cubes"]
+    F --> H["Cleanup<br/>holes, Taubin, QEM decimation"]
+    G --> H
+    H --> I["Texture baking<br/>project the 6 views"]
+    I --> J[".glb mesh"]
 ```
 
 ## Why it is built this way
@@ -40,17 +42,28 @@ it into two well-posed halves:
 1. **Hallucinate, consistently.** Zero123++ (Shi et al., 2023) is Stable Diffusion fine-tuned to
    denoise six views of an object *on one canvas*. Self-attention spans the whole canvas, so the views
    agree with each other, and the cameras are fixed and known, so no pose estimation is needed.
-2. **Reconstruct, with physics.** The surface is the zero level set of a signed distance function
-   `f(x)`. NeuS (Wang et al., 2021) turns `f` into an *unbiased* volume renderer (the rendering weight
-   peaks exactly at the surface), so `f` can be fitted to the six views by gradient descent:
+2. **Reconstruct.** Two interchangeable reconstructors turn the six posed views into a surface:
+   - **InstantMesh (default, seconds).** A Large Reconstruction Model (Xu et al., 2024): a DINO
+     ViT encodes each view together with its camera, a transformer decodes the tokens into a
+     *triplane* (three axis-aligned feature planes, a factorised 3D feature volume), and small MLPs
+     read an SDF and colour at any point. FlexiCubes extracts the mesh; because that extraction is
+     differentiable, the model was trained on rendered depth and normals of its own mesh, which is
+     why its surfaces come out smooth. It learned a prior over shapes from ~270k objects, so small
+     disagreements between the generated views are averaged away instead of carved into the surface.
+   - **NeuS (classic, minutes).** Fits a signed distance function `f(x)` to the six views by
+     gradient descent through an *unbiased* volume renderer (Wang et al., 2021):
+     `L = L_rgb + 0.5 · L_mask + 0.1 · L_eikonal`. Silhouette loss acts as a soft visual hull and
+     the Eikonal term `(‖∇f‖ − 1)²` keeps `f` a true distance field. Marching cubes extracts the mesh.
+     Kept as a selectable mode so the two approaches can be compared on the same views.
+3. **Clean up.** Floaters are removed, small holes closed, the surface Taubin-smoothed (a low-pass
+   filter that does not shrink the object) and simplified with quadric error metrics to ~40k
+   triangles, which keeps detail where the surface curves and makes the file about 10x smaller.
+4. **Texture.** The mesh is UV-unwrapped (xatlas) and every texel is coloured by projecting it into
+   the six views, using a z-buffer for visibility and weighting each view by `max(0, n·d)⁴`, so the
+   camera that sees the surface most head-on wins. Unseen texels fall back to the model's colour.
 
-   `L = L_rgb + 0.5 · L_mask + 0.1 · L_eikonal`
-
-   Silhouette loss acts as a soft visual hull, and the Eikonal term `(‖∇f‖ − 1)²` keeps `f` a true
-   distance field so the surface is clean. The field is a multi-resolution feature grid (Instant-NGP
-   style) with finite-difference normals and a coarse-to-fine schedule (Neuralangelo).
-3. **Extract.** Marching cubes on a 256³ grid gives a watertight mesh, coloured by querying the
-   learned radiance field head-on.
+Why InstantMesh became the default, with the theory and the measured problems of the NeuS-only
+version, is in [ADR 0010](docs/architecture/adr/0010-instantmesh-texture-baking-cleanup.md).
 
 The full derivations, design trade-offs (why not Gaussian splatting, why not a single feed-forward
 network) and references are in [backend/README.md](backend/README.md#the-theory-stage-by-stage).
@@ -141,9 +154,14 @@ The choice is remembered in your browser.
 ## References
 
 - Shi et al., *Zero123++: a Single Image to Consistent Multi-view Diffusion Base Model*, 2023.
+- Xu et al., *InstantMesh: Efficient 3D Mesh Generation from a Single Image with Sparse-view Large Reconstruction Models*, 2024.
+- Hong et al., *LRM: Large Reconstruction Model for Single Image to 3D*, ICLR 2024.
+- Shen et al., *Flexible Isosurface Extraction for Gradient-Based Mesh Optimization* (FlexiCubes), SIGGRAPH 2023.
 - Wang et al., *NeuS: Learning Neural Implicit Surfaces by Volume Rendering for Multi-view Reconstruction*, NeurIPS 2021.
 - Müller et al., *Instant Neural Graphics Primitives with a Multiresolution Hash Encoding*, SIGGRAPH 2022.
 - Li et al., *Neuralangelo: High-Fidelity Neural Surface Reconstruction*, CVPR 2023.
 - Gropp et al., *Implicit Geometric Regularization for Learning Shapes*, ICML 2020.
 - Lorensen & Cline, *Marching Cubes*, SIGGRAPH 1987.
+- Taubin, *A Signal Processing Approach to Fair Surface Design*, SIGGRAPH 1995.
+- Garland & Heckbert, *Surface Simplification Using Quadric Error Metrics*, SIGGRAPH 1997.
 - Qin et al., *U²-Net: Going Deeper with Nested U-Structure for Salient Object Detection*, 2020.
