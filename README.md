@@ -105,6 +105,18 @@ smoke test on every pull request.
 | --- | --- | --- | --- |
 | *add a photo* | *add `views.png`* | *add a render or GIF* | *mm:ss* |
 
+### Accuracy benchmark
+
+How close do the meshes come to the real object? Both reconstruction methods are scored on 30
+objects from **Google Scanned Objects** (real household items scanned by Google Research, CC BY 4.0):
+one rendered photo in, the mesh compared with the scan after similarity alignment, using Chamfer
+distance, F-score, normal consistency, silhouette IoU and PSNR in novel views, plus time and peak GPU
+memory, with bootstrap confidence intervals and a paired Wilcoxon test. An "oracle views" run (perfect
+views instead of Zero123++'s) separates the diffusion model's error from the reconstructor's.
+
+> Results pending the first Kaggle run. Protocol and caveats: [docs/benchmark.md](docs/benchmark.md).
+> Run it yourself with [`notebooks/facet_benchmark.ipynb`](notebooks/facet_benchmark.ipynb) on a free T4.
+
 ## Run it
 
 The models need an NVIDIA GPU with roughly 12 GB of memory or more (the free T4 has 15 GB).
@@ -146,9 +158,9 @@ The choice is remembered in your browser.
 | --- | --- |
 | [`backend/`](backend/) | API gateway, job queue, workers and the reconstruction pipeline, one module per stage |
 | [`frontend/`](frontend/) | Facet, the Angular web app |
-| [`notebooks/`](notebooks/) | Colab and Kaggle notebook for free GPUs |
+| [`notebooks/`](notebooks/) | Colab and Kaggle notebooks: run the backend, or run the accuracy benchmark |
 | [`scripts/`](scripts/) | `setup_gpu_env.sh` (pinned environment) and `serve_public.py` (server + tunnel) |
-| [`docs/`](docs/) | Architecture, design decisions (ADRs) and screenshots |
+| [`docs/`](docs/) | Architecture, design decisions (ADRs), the benchmark protocol and screenshots |
 | [`deploy/`](deploy/), `docker-compose.yml` | The full stack: Prometheus, Grafana and S3 config, smoke test |
 
 ## References
@@ -164,4 +176,6 @@ The choice is remembered in your browser.
 - Lorensen & Cline, *Marching Cubes*, SIGGRAPH 1987.
 - Taubin, *A Signal Processing Approach to Fair Surface Design*, SIGGRAPH 1995.
 - Garland & Heckbert, *Surface Simplification Using Quadric Error Metrics*, SIGGRAPH 1997.
+- Downs et al., *Google Scanned Objects: A High-Quality Dataset of 3D Scanned Household Items*, ICRA 2022.
+- Knapitsch et al., *Tanks and Temples: Benchmarking Large-Scale Scene Reconstruction* (F-score), SIGGRAPH 2017.
 - Qin et al., *U²-Net: Going Deeper with Nested U-Structure for Salient Object Detection*, 2020.

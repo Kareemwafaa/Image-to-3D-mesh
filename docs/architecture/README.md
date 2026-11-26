@@ -289,3 +289,4 @@ backend/app/
 | [0008](adr/0008-one-codebase-swappable-adapters.md) | One code base with swappable adapters (full and lite) |
 | [0009](adr/0009-s3-server-for-local-runs.md) | SeaweedFS as the local S3 server |
 | [0010](adr/0010-instantmesh-texture-baking-cleanup.md) | InstantMesh by default, texture baking and mesh cleanup |
+| [0011](adr/0011-benchmark-protocol.md) | An accuracy benchmark on Google Scanned Objects |
