@@ -1,5 +1,5 @@
 import { Component, computed, ElementRef, HostListener, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
-import { ApiError, ApiService, JobStatus, normalizeApiUrl } from './api.service';
+import { ApiError, ApiService, JobStatus, normalizeApiUrl, Reconstructor } from './api.service';
 import { ModelViewer } from './model-viewer';
 import { PointCloud } from './point-cloud';
 import { NgTemplateOutlet } from '@angular/common';
@@ -36,7 +36,8 @@ const PIPELINE = [
   { key: 'segmenting', label: 'Segment', status: 'Removing background' },
   { key: 'multiview', label: 'Multi-view', status: 'Generating views' },
   { key: 'reconstructing', label: 'Reconstruct', status: 'Reconstructing' },
-  { key: 'meshing', label: 'Mesh', status: 'Extracting mesh' },
+  { key: 'meshing', label: 'Mesh', status: 'Cleaning up the mesh' },
+  { key: 'texturing', label: 'Texture', status: 'Baking texture' },
   { key: 'export', label: 'Export', status: 'Exporting' },
 ] as const;
 type StepKey = (typeof PIPELINE)[number]['key'];
@@ -66,6 +67,17 @@ export class App implements OnInit, OnDestroy {
     { value: 256, label: 'Balanced', note: 'Good detail for most objects' },
     { value: 320, label: 'Fine', note: 'Most detail, slowest' },
   ];
+  protected readonly engines = [
+    { value: 'instantmesh', label: 'InstantMesh', note: 'Feed-forward model, about a minute', eta: 'About a minute on a GPU.' },
+    {
+      value: 'neus',
+      label: 'NeuS (classic)',
+      note: 'Fits a neural field to this object, slower',
+      eta: 'Takes a few minutes on a GPU.',
+    },
+  ] as const;
+  protected readonly engine = signal<Reconstructor>('instantmesh');
+  protected readonly engineInfo = computed(() => this.engines.find((e) => e.value === this.engine())!);
   protected readonly resolutionNote = computed(
     () => this.resolutions.find((r) => r.value === this.resolution())?.note ?? '',
   );
@@ -280,7 +292,12 @@ export class App implements OnInit, OnDestroy {
         this.setPhase({ kind: 'uploading' });
         jobId = await this.api.createJob(
           file,
-          { removeBackground: this.removeBg(), resolution: this.resolution() },
+          {
+            removeBackground: this.removeBg(),
+            reconstructor: this.engine(),
+            // The marching-cubes grid only applies to NeuS; InstantMesh has a fixed FlexiCubes grid.
+            resolution: this.engine() === 'neus' ? this.resolution() : undefined,
+          },
           signal,
         );
       } else {
