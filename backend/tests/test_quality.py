@@ -242,12 +242,14 @@ class _FakeGenerator:
 class _FakeLRM:
     """Stands in for InstantMesh: a slightly bumpy sphere with gray vertex colours."""
 
-    def __init__(self):
+    def __init__(self, background=None):
         self.calls = 0
+        self.background = background
 
     def reconstruct(self, views):
         self.calls += 1
         assert views.shape == (6, 96, 96, 3)
+        assert (views[self.background] == 1.0).all()  # pure white, as InstantMesh was trained
         s = trimesh.creation.icosphere(subdivisions=5, radius=0.6)
         return instantmesh.LRMOutput(
             np.asarray(s.vertices, np.float32),
@@ -270,7 +272,7 @@ def test_multiview_backend_produces_a_small_textured_glb(tmp_path, monkeypatch):
     for img, m in zip(backend.generator.views, masks, strict=True):
         mask_by_id[id(img)] = m
     monkeypatch.setattr(segmentation, "view_mask", lambda v: mask_by_id[id(v)])
-    backend._lrm = _FakeLRM()
+    backend._lrm = _FakeLRM(background=masks == 0)
 
     stages = []
     opts = GenerateOptions(texture_size=256, target_faces=3000)
@@ -325,6 +327,7 @@ def test_instantmesh_upstream_runs_without_nvdiffrast(tmp_path, monkeypatch):
     dino.ViTModel(cfg, add_pooling_layer=False).save_pretrained(tmp_path)
     ViTImageProcessor(image_mean=[0.485, 0.456, 0.406], image_std=[0.229, 0.224, 0.225]).save_pretrained(tmp_path)
 
+    torch.manual_seed(0)
     rec = instantmesh.InstantMeshReconstructor("large", device="cpu")
     rec.build(
         params=dict(
@@ -337,10 +340,21 @@ def test_instantmesh_upstream_runs_without_nvdiffrast(tmp_path, monkeypatch):
             grid_res=24,
         )
     )
-    out = rec.reconstruct(np.ones((6, 160, 160, 3), np.float32))  # resized to 320 inside
-    assert out.vertices.ndim == 2 and out.vertices.shape[1] == 3 and len(out.faces) > 0
-    assert out.vertex_colors.shape == (len(out.vertices), 3) and out.vertex_colors.dtype == np.uint8
-    assert np.abs(out.vertices).max() <= 1.05 + 1e-3  # inside the FlexiCubes grid (scale 2.1)
+    # Untrained weights predict an SDF without a surface, so upstream falls back to
+    # the grid-sized box. That is exactly what the first real T4 run produced, and
+    # it must now fail loudly instead of being exported.
+    from app.pipeline.errors import MeshingError
+
+    with pytest.raises(MeshingError, match="empty-shape fallback"):
+        rec.reconstruct(np.ones((6, 160, 160, 3), np.float32))  # resized to 320 inside
+
+    # The raw upstream output has the shapes our wrapper relies on.
+    planes = torch.randn(1, 3, 8, 64, 64)
+    with torch.no_grad():
+        v, f, c = rec.model.extract_mesh(planes, use_texture_map=False)
+    assert v.ndim == 2 and v.shape[1] == 3 and len(f) > 0
+    assert c.shape == (len(v), 3) and c.dtype == np.uint8
+    assert np.abs(v).max() <= 1.05 + 1e-3  # inside the FlexiCubes grid (scale 2.1)
 
 
 def test_chunked_geometry_matches_upstream(tmp_path):
@@ -369,3 +383,30 @@ def test_chunked_geometry_matches_upstream(tmp_path):
     for e, g in zip(expected, got, strict=True):
         assert e.shape == g.shape
         torch.testing.assert_close(g, e, rtol=1e-5, atol=1e-6)
+
+
+def test_grid_box_detector():
+    box = trimesh.creation.box(extents=(2.1, 2.1, 2.1))
+    sphere = trimesh.creation.icosphere(radius=0.8)
+    assert instantmesh.looks_like_the_grid_box(np.asarray(box.vertices), 1.05)
+    assert not instantmesh.looks_like_the_grid_box(np.asarray(sphere.vertices), 1.05)
+    tall = np.asarray(sphere.vertices) * [0.5, 0.5, 1.3]  # touches top and bottom only
+    assert not instantmesh.looks_like_the_grid_box(tall, 1.05)
+
+
+def test_whiten_background_and_white_conditioning():
+    from PIL import Image
+
+    from app.pipeline.multiview import composite_on, whiten_background
+
+    views = np.full((1, 4, 4, 3), 0.8, np.float32)  # off-white background, as diffusion produces
+    views[0, 1:3, 1:3] = 0.1
+    masks = np.zeros((1, 4, 4), np.float32)
+    masks[0, 1:3, 1:3] = 1.0
+    out = whiten_background(views, masks)
+    assert (out[0][masks[0] == 0] == 1.0).all() and np.allclose(out[0, 1:3, 1:3], 0.1)
+
+    rgba = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+    rgba.putpixel((1, 1), (10, 20, 30, 255))
+    rgb = composite_on(rgba, (255, 255, 255))
+    assert rgb.mode == "RGB" and rgb.getpixel((0, 0)) == (255, 255, 255) and rgb.getpixel((1, 1)) == (10, 20, 30)
