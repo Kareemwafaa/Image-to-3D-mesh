@@ -69,7 +69,9 @@ services:
       - s3data:/data
       - ./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8333/healthz"]
+      # 127.0.0.1, not localhost: SeaweedFS listens on IPv4 only, and where Docker
+      # has IPv6 on, localhost resolves to ::1 first and the check never passes.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8333/healthz"]
       interval: 5s
       retries: 30
 
