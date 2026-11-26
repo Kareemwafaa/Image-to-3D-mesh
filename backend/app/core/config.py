@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     preload_model: bool = True
     zero123pp_model: str = "sudo-ai/zero123plus-v1.2"
     zero123pp_pipeline: str = "sudo-ai/zero123plus-pipeline"
+    # "instantmesh": the white-background UNet InstantMesh was trained with (best for both reconstructors)
+    zero123pp_unet: Literal["instantmesh", "original"] = "instantmesh"
+    instantmesh_variant: Literal["large", "base"] = "large"
+    # Load InstantMesh at start-up. Set false to save ~2 GB of GPU memory if you only use NeuS.
+    preload_instantmesh: bool = True
+    default_reconstructor: Literal["instantmesh", "neus"] = Field(
+        "instantmesh", validation_alias=AliasChoices("RECONSTRUCTOR", "DEFAULT_RECONSTRUCTOR")
+    )
+    default_texture_size: int = Field(1024, validation_alias=AliasChoices("TEXTURE_SIZE", "DEFAULT_TEXTURE_SIZE"))
+    default_target_faces: int = Field(40_000, validation_alias=AliasChoices("TARGET_FACES", "DEFAULT_TARGET_FACES"))
     # Defaults for the per-request form fields (short env names kept for the notebooks).
     default_mc_resolution: int = Field(256, validation_alias=AliasChoices("MC_RESOLUTION", "DEFAULT_MC_RESOLUTION"))
     default_foreground_ratio: float = Field(

@@ -7,7 +7,7 @@ import asyncio
 import json
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -49,6 +49,12 @@ async def create_job(
     mc_resolution: Optional[int] = Form(None, ge=32, le=512),
     diffusion_steps: Optional[int] = Form(None, ge=10, le=150),
     recon_iters: Optional[int] = Form(None, ge=100, le=20000),
+    reconstructor: Optional[Literal["instantmesh", "neus"]] = Form(
+        None, description="instantmesh (fast, default) or neus (classic per-object fit)"
+    ),
+    texture: bool = Form(True, description="Bake a colour texture from the generated views"),
+    texture_size: Optional[int] = Form(None, ge=256, le=2048),
+    target_faces: Optional[int] = Form(None, ge=0, le=500_000, description="0 keeps every triangle"),
     seed: Optional[int] = Form(None, ge=0, le=2**31 - 1),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     p: Principal = Depends(principal),
@@ -62,6 +68,10 @@ async def create_job(
         mc_resolution=mc_resolution or s.default_mc_resolution,
         diffusion_steps=diffusion_steps or s.default_diffusion_steps,
         recon_iters=recon_iters or s.default_recon_iters,
+        reconstructor=reconstructor or s.default_reconstructor,
+        texture=texture,
+        texture_size=texture_size or s.default_texture_size,
+        target_faces=s.default_target_faces if target_faces is None else target_faces,
         seed=seed,
     )
     job, replayed = await submit_job(c, p, data, options, idempotency_key)

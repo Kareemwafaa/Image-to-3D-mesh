@@ -1,6 +1,11 @@
 # Tests and linting. The pipeline tests also need torch; CI installs the CPU wheel.
 -r worker-cpu.txt
 scikit-image>=0.22
+fast-simplification>=0.1.7   # mesh cleanup tests
+xatlas>=0.0.9                # texture baking tests
+transformers==4.35.2         # InstantMesh smoke test (tiny random model, no weights)
+huggingface-hub>=0.19,<0.26
+einops>=0.7
 pytest>=8
 pytest-asyncio>=0.24
 httpx>=0.27

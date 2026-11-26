@@ -35,6 +35,9 @@ PASSTHROUGH = (
     "ADMIN_API_KEY",
     "DIFFUSION_STEPS",
     "RECON_ITERS",
+    "RECONSTRUCTOR",
+    "TEXTURE_SIZE",
+    "TARGET_FACES",
     "MC_RESOLUTION",
     "ANON_SUBMIT_PER_MINUTE",
     "ANON_MAX_INFLIGHT",
@@ -45,20 +48,24 @@ runtime_env.setdefault("CORS_ORIGINS", "*")
 
 def _download_weights() -> None:
     """Runs once at image build time, so containers start without downloads."""
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import hf_hub_download, snapshot_download
 
     snapshot_download("sudo-ai/zero123plus-v1.2")
     snapshot_download("sudo-ai/zero123plus-pipeline")
+    snapshot_download("facebook/dino-vitb16")
+    hf_hub_download("TencentARC/InstantMesh", "instant_mesh_large.ckpt")
+    hf_hub_download("TencentARC/InstantMesh", "diffusion_pytorch_model.bin")
     import rembg
 
     rembg.new_session("u2net")
+    # InstantMesh's model code (a 13 MB tarball) is fetched on first start.
 
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("libgl1", "libglib2.0-0")
     .pip_install_from_requirements(str(here / "requirements" / "lite-gpu.txt"))
-    .env({"HF_HOME": "/models/hf", "U2NET_HOME": "/models/u2net"})
+    .env({"HF_HOME": "/models/hf", "U2NET_HOME": "/models/u2net", "XDG_CACHE_HOME": "/models/cache"})
     .run_function(_download_weights)
     .env(
         {

@@ -100,7 +100,7 @@ def test_neus_recovers_a_sphere():
     )
     model = reconstruct(views, masks, cams, cfg, device="cpu")
     mesh = extract_mesh(model, resolution=48, device="cpu")
-    verts_zup = np.asarray(mesh.vertices)[:, [2, 0, 1]]
+    verts_zup = np.asarray(mesh.vertices)
     dist = np.abs(np.linalg.norm(verts_zup - np.array(centre), axis=-1) - radius)
     assert dist.mean() < 0.08, dist.mean()
     colours = mesh.visual.vertex_colors[:, :3].mean(axis=0) / 255

@@ -45,7 +45,9 @@ jobs:
           cache-dependency-path: backend/requirements/*.txt
       - run: pip install $TORCH_CPU
       - run: pip install -r requirements/dev.txt
-      - name: pytest (lite mode, fakeredis, CPU NeuS)
+      - name: pytest (lite mode, fakeredis, CPU NeuS, tiny InstantMesh)
+        env:
+          I3D_REQUIRE_NETWORK: "1"  # the InstantMesh test must download upstream's source, not skip
         run: pytest -m "not integration" -q --durations=10
 
   integration:

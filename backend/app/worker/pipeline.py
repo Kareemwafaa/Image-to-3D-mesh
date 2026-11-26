@@ -17,9 +17,16 @@ VIEWS_FILE = "views.png"
 
 def create_backend(s: Settings) -> MeshBackend:
     if s.model_backend == "multiview":
-        from ..backends.multiview import MultiViewNeuSBackend
+        from ..backends.multiview import MultiViewBackend
 
-        return MultiViewNeuSBackend(s.zero123pp_model, s.zero123pp_pipeline, s.device)
+        return MultiViewBackend(
+            s.zero123pp_model,
+            s.zero123pp_pipeline,
+            s.device,
+            unet=s.zero123pp_unet,
+            instantmesh_variant=s.instantmesh_variant,
+            preload_instantmesh=s.preload_instantmesh,
+        )
     from ..backends.mock import MockBackend
 
     return MockBackend()
