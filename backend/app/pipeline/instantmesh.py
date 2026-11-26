@@ -236,6 +236,22 @@ def chunked_geometry_prediction(synthesizer, sample_from_planes, chunk: int = 2*
     return predict
 
 
+def looks_like_the_grid_box(vertices: np.ndarray, half_extent: float, tol: float = 0.05) -> bool:
+    """True if the mesh reaches the FlexiCubes grid's boundary on all six sides.
+
+    When the predicted SDF has no zero crossing, upstream forces the grid's
+    boundary to be "outside" so that extraction still returns something: the
+    result is a cube the size of the whole grid. A real object is normalised to
+    fit well inside the grid, so touching every face means the reconstruction
+    failed (usually because the views' background was not pure white).
+    """
+    if len(vertices) == 0:
+        return True
+    lo, hi = vertices.min(axis=0), vertices.max(axis=0)
+    edge = half_extent * (1 - tol)
+    return bool((lo <= -edge).all() and (hi >= edge).all())
+
+
 @dataclass
 class LRMOutput:
     vertices: np.ndarray  # (N, 3) float32, z-up world frame of cameras.zero123pp_cameras
@@ -312,8 +328,16 @@ class InstantMeshReconstructor:
         with torch.no_grad():
             planes = self.model.forward_planes(images, cams)
             verts, faces, colors = self.model.extract_mesh(planes, use_texture_map=False)
+        verts = np.asarray(verts, dtype=np.float32)
+        if looks_like_the_grid_box(verts, self.model.grid_scale / 2):
+            from .errors import MeshingError
+
+            raise MeshingError(
+                "InstantMesh returned the empty-shape fallback (a box filling the whole grid). "
+                "Check the generated views: the object must be on a pure white background."
+            )
         return LRMOutput(
-            vertices=np.asarray(verts, dtype=np.float32),
+            vertices=verts,
             faces=np.asarray(faces, dtype=np.int64),
             vertex_colors=np.asarray(colors, dtype=np.uint8),
         )

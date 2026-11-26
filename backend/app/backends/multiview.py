@@ -68,10 +68,14 @@ class MultiViewBackend:
             self.lrm.load()
 
     # --- reconstructors -------------------------------------------------------------
-    def _instantmesh(self, view_arr: np.ndarray, progress) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _instantmesh(self, view_arr, mask_arr, progress) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         progress(_RECON[0], "reconstructing")
         _free_cuda_cache()
-        out = self.lrm.reconstruct(view_arr)
+        bg = view_arr[mask_arr < 0.5]
+        if bg.size:
+            # For diagnosis: InstantMesh expects exactly 1.0 here (we force it below).
+            log.info("view background brightness before whitening: mean %.3f", float(bg.mean()))
+        out = self.lrm.reconstruct(multiview.whiten_background(view_arr, mask_arr))
         return out.vertices, out.faces, out.vertex_colors
 
     def _neus(self, view_arr, mask_arr, options: GenerateOptions, progress) -> tuple[np.ndarray, ...]:
@@ -118,7 +122,7 @@ class MultiViewBackend:
         view_arr = multiview.views_to_arrays(views)
 
         if method == "instantmesh":
-            verts, faces, colors = self._instantmesh(view_arr, progress)
+            verts, faces, colors = self._instantmesh(view_arr, mask_arr, progress)
         else:
             verts, faces, colors = self._neus(view_arr, mask_arr, options, progress)
         t2 = time.monotonic()

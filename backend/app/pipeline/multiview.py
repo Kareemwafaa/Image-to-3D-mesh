@@ -97,8 +97,13 @@ class Zero123PlusGenerator:
         generator = None
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-        # The pipeline composites RGBA onto gray itself; the input must be square.
         cond = image.convert("RGBA").resize((VIEW_SIZE, VIEW_SIZE), Image.LANCZOS)
+        if self.unet == "instantmesh":
+            # sudo-ai's pipeline composites an RGBA input onto gray, but InstantMesh's
+            # white-background UNet was fine-tuned with inputs composited onto white
+            # (InstantMesh ships a copy of the pipeline with that one line changed).
+            # Doing it here, an RGB image passes through the pipeline untouched.
+            cond = composite_on(cond, (255, 255, 255))
         grid = self.pipe(cond, num_inference_steps=steps, generator=generator).images[0]
         return split_grid(grid)
 
@@ -112,6 +117,21 @@ class Zero123PlusGenerator:
         self.pipe.to("cpu")
         self._offloaded = True
         torch.cuda.empty_cache()
+
+
+def composite_on(rgba: Image.Image, color: tuple[int, int, int]) -> Image.Image:
+    """Flatten an RGBA image onto a solid colour."""
+    out = Image.new("RGB", rgba.size, color)
+    out.paste(rgba, mask=rgba.getchannel("A"))
+    return out
+
+
+def whiten_background(views: np.ndarray, masks: np.ndarray) -> np.ndarray:
+    """(V,H,W,3) views, (V,H,W) foreground masks -> views with a pure white background.
+    InstantMesh was trained on renders over exactly 1.0 white; an off-white or gray
+    background is read as solid material and reconstructed as a box."""
+    m = np.clip(masks, 0.0, 1.0)[..., None]
+    return (views * m + (1.0 - m)).astype(np.float32)
 
 
 def views_to_arrays(views: list[Image.Image]) -> np.ndarray:

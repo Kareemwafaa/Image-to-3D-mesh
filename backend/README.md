@@ -191,6 +191,15 @@ of gathering them from a stored copy. The outputs are identical (tested
 against upstream). On GPUs under 20 GiB, Zero123++ is also parked in CPU RAM
 while InstantMesh runs (`LOW_VRAM`).
 
+InstantMesh was trained on views over a pure white background, and anything
+else is read as solid material. Its white-background UNet must therefore be
+conditioned on an input composited onto white (sudo-ai's pipeline uses gray;
+InstantMesh ships a copy with that one line changed), and before
+reconstruction we force every view's background to exactly 1.0 using the
+U²-Net masks. If the SDF still has no surface, upstream silently returns a
+cube the size of the whole grid; `looks_like_the_grid_box` turns that into a
+clear `empty_mesh` error instead of a fake result.
+
 ### 8. Cleanup and texture baking
 
 `postprocess.py`: drop floaters, close holes up to 200 edges (fan around the
