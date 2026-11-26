@@ -262,12 +262,22 @@ class LRMOutput:
 class InstantMeshReconstructor:
     """Wraps the upstream model: load once, then views -> mesh in one forward pass."""
 
-    def __init__(self, variant: str = "large", device: str = "cuda", hf_repo: str = INSTANTMESH_REPO) -> None:
+    def __init__(
+        self,
+        variant: str = "large",
+        device: str = "cuda",
+        hf_repo: str = INSTANTMESH_REPO,
+        grid_res: int | None = None,
+    ) -> None:
         if variant not in VARIANTS:
             raise ValueError(f"Unknown InstantMesh variant {variant!r}; choose from {sorted(VARIANTS)}")
         self.variant = variant
         self.device = device
         self.hf_repo = hf_repo
+        # FlexiCubes grid. The checkpoints were trained at 128; the triplane is continuous,
+        # so a finer grid (e.g. 192) resolves thin walls and cavities better. GUESS:
+        # quality at other resolutions has not been measured.
+        self.grid_res = grid_res
         self.model = None
         self._upstream = None
         self._lock = threading.Lock()
@@ -276,7 +286,10 @@ class InstantMeshReconstructor:
         """Construct the network (and its FlexiCubes grid) on self.device.
         `params`/`state_dict` override the released config/weights (used by tests)."""
         up = self._upstream = import_upstream()
-        cfg = dict(VARIANTS[self.variant], **(params or {}))
+        cfg = dict(VARIANTS[self.variant])
+        if self.grid_res:
+            cfg["grid_res"] = self.grid_res
+        cfg.update(params or {})
         model = up.InstantMesh(**cfg)
         if state_dict is not None:
             model.load_state_dict(state_dict, strict=True)

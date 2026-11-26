@@ -27,6 +27,7 @@ class GenerateOptions:
     recon_iters: int = 2500  # neus only
     texture: bool = True  # bake a texture from the views (else vertex colours)
     texture_size: int = 1024
+    color_match: float = 1.0  # 0..1: pull the texture's colours towards the input photo
     target_faces: int = 40_000  # quadric decimation target; 0 keeps every face
     smooth_iters: Optional[int] = None  # Taubin iterations; None = per-reconstructor default
     seed: Optional[int] = None

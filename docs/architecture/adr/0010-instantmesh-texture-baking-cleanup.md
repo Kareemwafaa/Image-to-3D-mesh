@@ -93,13 +93,21 @@ back (projective texturing):
 3. For each view `i`: project `p` with the pinhole model, test visibility
    against a z-buffer of the mesh rendered from camera `i`, check that the
    pixel is inside the view's silhouette, and weight by
-   `w_i = max(0, n·d_i)^4`, `d_i` the direction to the camera. Head-on views
+   `w_i = max(0, n·d_i)^12`, `d_i` the direction to the camera. Head-on views
    win because there one pixel covers the least surface (least resampling
-   blur); the power 4 makes blending close to "pick the best view" while
-   still feathering seams between views.
+   blur); the power 12 makes blending close to "pick the best view" while
+   still feathering seams between views. (It was 4 at first; averaging
+   several views that disagree in colour gave purple/red blotches.) The
+   silhouette masks are eroded by 2 px first, because edge pixels mix the
+   object with the white background.
 4. Texels no camera sees (the underside: all cameras are within 20° of the
    equator) take the reconstructor's own colour.
-5. Dilate colours outwards into empty texels so mip-mapping does not pull
+5. Match the baked colours to the input photo (Reinhard-style transfer in
+   YCbCr: per-channel mean and spread of the texture are pulled to the
+   photo's). Zero123++ tends to render dark objects lighter and slightly
+   tinted. Brightness scale is clamped to 0.5–2, and chroma is only ever
+   reduced, never boosted. `color_match=0` turns it off.
+6. Dilate colours outwards into empty texels so mip-mapping does not pull
    black into chart seams.
 
 The rasteriser (`app/pipeline/raster.py`) is ~100 lines of vectorised NumPy,
@@ -111,10 +119,15 @@ In order: drop floaters (components under 5% of the largest one's area);
 close holes up to 200 boundary edges with a fan around the centroid, wound
 to match the neighbours; Taubin smoothing (λ = 0.5, μ = −0.53), a low-pass
 filter that removes bumps of a few triangles without shrinking the object
-like plain Laplacian smoothing would (3 iterations for InstantMesh, 10 for
+like plain Laplacian smoothing would (5 iterations for InstantMesh, 10 for
 NeuS); quadric-error decimation (Garland & Heckbert, 1997) to 40k faces,
 which removes triangles where the surface is flat and keeps them where it
 curves; then consistent outward winding.
+
+Concave insides (a mug's cavity) are seen by no camera: all six views look
+from outside, at most 20° above the rim. Their shape comes only from the
+model's prior, so they stay shallow and lumpy. `INSTANTMESH_GRID_RES` (default
+128) runs FlexiCubes on a finer grid for thinner walls; 192 is untested on a T4.
 
 ## Consequences
 

@@ -214,7 +214,15 @@ atlas. Rasterising in UV space gives each texel a 3D point and normal. Each
 texel is projected into the six views; a z-buffer (the same NumPy rasteriser,
 `raster.py`) rejects views where it is hidden, the view's mask rejects
 background pixels, and the weight `max(0, n·d)⁴` prefers the camera that
-sees it most head-on. Texels no camera sees take the model's own colour.
+sees it most head-on (k = 12, so each texel comes almost entirely from its
+best view: the six views are separate diffusion samples, and averaging their
+small colour disagreements produced purple and red blotches). Masks are
+eroded by 2 px so silhouette-edge pixels, which mix in background, are not
+used. Texels no camera sees take the model's own colour. Finally the texture
+is colour-matched to the input photo (Reinhard-style statistics transfer in
+YCbCr): luma mean and spread are matched, chroma is pulled towards the
+photo's and its spread can only shrink. This fixes exposure drift (a matte
+black mug came out light grey) and mutes leftover blotches.
 
 ### Why keep NeuS?
 
@@ -293,6 +301,7 @@ Interactive docs are served at `/docs`. The full route list is in
 | `recon_iters` | `2500` | 100 to 20000 | NeuS optimisation steps (NeuS only) |
 | `texture` | `true` | | Bake a texture from the views; `false` keeps vertex colours |
 | `texture_size` | `1024` | 256 to 2048 | Texture atlas size in pixels |
+| `color_match` | `1.0` | 0 to 1 | Match the texture's colours and brightness to the photo |
 | `target_faces` | `40000` | 0 to 500000 | Decimation target; `0` keeps every triangle |
 | `seed` | random | | Fix it for reproducible views |
 
@@ -413,6 +422,8 @@ All settings are environment variables (`app/core/config.py` has the full list).
 | `RECONSTRUCTOR`, `TEXTURE_SIZE`, `TARGET_FACES` | `instantmesh`, `1024`, `40000` | Defaults for the quality form fields |
 | `INSTANTMESH_VARIANT` | `large` | `large` or `base` (smaller, less GPU memory) |
 | `PRELOAD_INSTANTMESH` | `true` | Load InstantMesh at start-up; `false` if you only use NeuS |
+| `INSTANTMESH_GRID_RES` | `128` | FlexiCubes grid; try `192` for cavities and thin walls (more time and memory, quality unmeasured) |
+| `COLOR_MATCH` | `1.0` | 0 to 1: how strongly the texture is matched to the input photo's colours |
 | `LOW_VRAM` | automatic | Move Zero123++ to CPU RAM while reconstructing; on by default for GPUs under 20 GiB |
 | `ZERO123PP_UNET` | `instantmesh` | `instantmesh` (white background) or `original` (sudo-ai's gray) |
 | `INSTANTMESH_SRC` | download | Use an existing checkout of InstantMesh's `src/` (renamed `instantmesh_src`) |

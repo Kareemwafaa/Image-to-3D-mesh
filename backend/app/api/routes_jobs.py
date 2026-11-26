@@ -54,6 +54,7 @@ async def create_job(
     ),
     texture: bool = Form(True, description="Bake a colour texture from the generated views"),
     texture_size: Optional[int] = Form(None, ge=256, le=2048),
+    color_match: Optional[float] = Form(None, ge=0.0, le=1.0, description="Match texture colours to the photo"),
     target_faces: Optional[int] = Form(None, ge=0, le=500_000, description="0 keeps every triangle"),
     seed: Optional[int] = Form(None, ge=0, le=2**31 - 1),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
@@ -71,6 +72,7 @@ async def create_job(
         reconstructor=reconstructor or s.default_reconstructor,
         texture=texture,
         texture_size=texture_size or s.default_texture_size,
+        color_match=s.default_color_match if color_match is None else color_match,
         target_faces=s.default_target_faces if target_faces is None else target_faces,
         seed=seed,
     )

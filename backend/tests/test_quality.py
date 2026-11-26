@@ -410,3 +410,30 @@ def test_whiten_background_and_white_conditioning():
     rgba.putpixel((1, 1), (10, 20, 30, 255))
     rgb = composite_on(rgba, (255, 255, 255))
     assert rgb.mode == "RGB" and rgb.getpixel((0, 0)) == (255, 255, 255) and rgb.getpixel((1, 1)) == (10, 20, 30)
+
+
+def test_color_match_pulls_texture_towards_the_photo():
+    from app.pipeline.texturing import _to_ycbcr, match_colors
+
+    rng = np.random.default_rng(0)
+    # A light-grey texture with purple and red blotches; the photo is a matte black mug.
+    texture = np.clip(0.7 + 0.05 * rng.standard_normal((5000, 3)), 0, 1)
+    texture[:500] = [0.6, 0.4, 0.75]
+    texture[500:800] = [0.75, 0.35, 0.35]
+    photo = np.clip(0.12 + 0.04 * rng.standard_normal((5000, 1)) * [1, 1, 1], 0, 1)
+
+    out = match_colors(texture, photo)
+    y_out, y_photo = _to_ycbcr(out)[:, 0], _to_ycbcr(photo)[:, 0]
+    assert abs(y_out.mean() - y_photo.mean()) < 0.02  # exposure matches the photo
+    chroma = lambda c: np.linalg.norm(_to_ycbcr(c)[:, 1:], axis=1).mean()  # noqa: E731
+    assert chroma(out) < 0.35 * chroma(texture)  # blotches are muted
+    assert np.allclose(match_colors(texture, photo, strength=0.0), texture)
+
+
+def test_erode_shrinks_masks():
+    from app.pipeline.texturing import erode
+
+    m = np.zeros((9, 9))
+    m[2:7, 2:7] = 1.0
+    e = erode(m, 1)
+    assert e.sum() == 9 and e[4, 4] == 1.0 and e[2, 2] == 0.0
