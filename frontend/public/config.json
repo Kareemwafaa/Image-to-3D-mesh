@@ -1,7 +1,7 @@
 {
   "apiUrl": "http://localhost:8000",
   "feedback": {
-    "supabaseUrl": "",
-    "supabaseAnonKey": ""
+    "supabaseUrl": "https://kehtztkllntemvebkiwl.supabase.co",
+    "supabaseAnonKey": "sb_publishable_Xig77PBmgnxaoz3J1iCwoQ_ZS8ZMkzs"
   }
 }
