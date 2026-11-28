@@ -430,6 +430,28 @@ def test_color_match_pulls_texture_towards_the_photo():
     assert np.allclose(match_colors(texture, photo, strength=0.0), texture)
 
 
+def test_color_match_removes_colours_the_photo_does_not_have():
+    from app.pipeline.texturing import _to_ycbcr, match_colors
+
+    rng = np.random.default_rng(1)
+    texture = np.clip(0.5 + 0.03 * rng.standard_normal((4000, 3)), 0, 1)
+    texture[:300] = [0.55, 0.42, 0.7]  # purple blotch
+    grey_photo = np.clip(0.2 + 0.05 * rng.standard_normal((4000, 1)) * [1, 1, 1], 0, 1)
+
+    out = _to_ycbcr(match_colors(texture, grey_photo))
+    assert np.abs(out[:300, 1:]).max() < 0.02  # the blotch is grey now
+
+    # Half the photo's brightness when asked to, measured on the median.
+    y = _to_ycbcr(match_colors(texture, grey_photo, albedo_scale=0.5))[:, 0]
+    assert abs(np.median(y) - 0.5 * np.median(_to_ycbcr(grey_photo)[:, 0])) < 0.01
+
+    # A colourful photo keeps its colours: a red object stays red.
+    red_photo = np.clip([0.7, 0.1, 0.1] + 0.03 * rng.standard_normal((4000, 3)), 0, 1)
+    red_tex = np.clip([0.6, 0.2, 0.2] + 0.03 * rng.standard_normal((4000, 3)), 0, 1)
+    out = match_colors(red_tex, red_photo)
+    assert (out[:, 0] > out[:, 1] + 0.3).mean() > 0.95
+
+
 def test_erode_shrinks_masks():
     from app.pipeline.texturing import erode
 

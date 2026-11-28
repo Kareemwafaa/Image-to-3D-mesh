@@ -93,6 +93,12 @@ def _bilinear(img: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return top * (1 - fy) + bottom * fy
 
 
+# Texture brightness relative to the photo's (see match_colors). Measured once: a black mug's
+# photo has median luma ~0.22; textured at that brightness, the web viewer showed it at ~0.36,
+# about 1.3x too bright. 0.75 is roughly 1 / 1.3. A rough correction, not real delighting.
+ALBEDO_SCALE = 0.75
+
+
 def _to_ycbcr(rgb: np.ndarray) -> np.ndarray:
     y = rgb @ np.array([0.299, 0.587, 0.114])
     return np.stack([y, (rgb[:, 2] - y) * 0.564, (rgb[:, 0] - y) * 0.713], axis=-1)
@@ -103,19 +109,32 @@ def _from_ycbcr(ycc: np.ndarray) -> np.ndarray:
     return np.stack([y + 1.403 * cr, y - 0.344 * cb - 0.714 * cr, y + 1.773 * cb], axis=-1)
 
 
-def match_colors(colors: np.ndarray, reference: np.ndarray, strength: float = 1.0) -> np.ndarray:
+def match_colors(
+    colors: np.ndarray, reference: np.ndarray, strength: float = 1.0, albedo_scale: float = 1.0
+) -> np.ndarray:
     """Statistics transfer of (K, 3) RGB colours towards (M, 3) reference pixels, both in [0, 1].
-    Luma: mean and spread matched (spread ratio clamped to [0.5, 2]). Chroma: mean matched,
-    spread only ever reduced, so a colourful texture can calm down but noise is never amplified."""
+
+    Luma: the texture's median is moved to the photo's median times `albedo_scale`, and its
+    spread matched (ratio clamped to [0.5, 2]). Medians, because a photo's specular highlights
+    drag the mean up. `albedo_scale` < 1 takes out some of the photo's own lighting: the photo
+    shows albedo x light, and a 3D viewer lights the model again, so copying the photo's
+    brightness straight into the texture makes the object look lit twice (a black mug turns grey).
+    Chroma: mean matched, spread only ever reduced, then each texel clamped to the range of
+    chroma that actually occurs in the photo, so colours the photo does not have (purple or red
+    blotches from disagreeing views) cannot survive."""
     if len(colors) == 0 or len(reference) == 0 or strength <= 0:
         return colors
     src, ref = _to_ycbcr(colors), _to_ycbcr(reference)
     mu_s, sd_s = src.mean(0), src.std(0) + 1e-6
     mu_r, sd_r = ref.mean(0), ref.std(0) + 1e-6
+    mu_s[0], mu_r[0] = np.median(src[:, 0]), np.median(ref[:, 0]) * albedo_scale
     scale = sd_r / sd_s
     scale[0] = np.clip(scale[0], 0.5, 2.0)
     scale[1:] = np.minimum(scale[1:], 1.0)
-    out = _from_ycbcr((src - mu_s) * scale + mu_r)
+    moved = (src - mu_s) * scale + mu_r
+    lo, hi = np.percentile(ref[:, 1:], [1, 99], axis=0)
+    moved[:, 1:] = np.clip(moved[:, 1:], lo - 0.01, hi + 0.01)
+    out = _from_ycbcr(moved)
     return np.clip(colors + strength * (out - colors), 0.0, 1.0)
 
 
@@ -172,6 +191,7 @@ def bake_texture(
     depth_tolerance: float = 0.02,
     reference: np.ndarray | None = None,
     color_match: float = 1.0,
+    albedo_scale: float = ALBEDO_SCALE,
 ) -> trimesh.Trimesh:
     """Return a z-up mesh with UVs and a baked baseColor texture.
 
@@ -232,7 +252,7 @@ def bake_texture(
         color[~seen] = (vc[corner[~seen]] * bary[~seen]).sum(1)
         seen[:] = True
     if reference is not None and color_match > 0:
-        color[seen] = match_colors(color[seen], np.asarray(reference, dtype=np.float64), color_match)
+        color[seen] = match_colors(color[seen], np.asarray(reference, dtype=np.float64), color_match, albedo_scale)
     log.info("texture: %d texels, %.1f%% seen by a view", len(pos), 100.0 * (wsum > 1e-8).mean() if len(pos) else 0)
 
     # 5. write the atlas and pad the charts

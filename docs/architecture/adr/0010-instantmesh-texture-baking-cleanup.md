@@ -106,7 +106,14 @@ back (projective texturing):
    YCbCr: per-channel mean and spread of the texture are pulled to the
    photo's). Zero123++ tends to render dark objects lighter and slightly
    tinted. Brightness scale is clamped to 0.5–2, and chroma is only ever
-   reduced, never boosted. `color_match=0` turns it off.
+   reduced, never boosted. `color_match=0` turns it off. Two refinements
+   after the first GPU run with it: luma is matched on the **median**
+   times 0.75, because the photo shows albedo × light and the web viewer
+   lights the model again (the black mug still looked grey: photo median
+   0.22, rendered 0.36); and every texel's chroma is clamped to the 1st–99th
+   percentile range of the photo's, so a colour the photo does not contain
+   (the faint purple patches) cannot remain. This is a rough correction,
+   not real intrinsic-image delighting.
 6. Dilate colours outwards into empty texels so mip-mapping does not pull
    black into chart seams.
 
