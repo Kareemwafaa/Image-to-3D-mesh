@@ -89,7 +89,6 @@ export class App implements OnInit, OnDestroy {
   );
   /** Viewer preferences on the result screen. */
   protected readonly autoRotate = signal(true);
-  protected readonly showGrid = signal(true);
   /** Which screen of the flow is showing. */
   protected readonly view = computed<'empty' | 'ready' | 'working' | 'done'>(() => {
     const k = this.phase().kind;
