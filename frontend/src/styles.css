@@ -85,7 +85,11 @@ button { font: inherit; color: inherit; }
 .flow li.past .flow-num { border-color: var(--text-3); color: var(--text-2); }
 .flow li.on { color: var(--text); background: var(--surface-2); }
 .flow li.on .flow-num { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.server { justify-self: end; display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; margin: -6px -10px; background: none; border: 1px solid transparent; border-radius: 999px; cursor: pointer; font: 12px var(--mono); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.nav-end { justify-self: end; display: flex; align-items: center; gap: 22px; }
+.nav-link { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; margin: -6px -10px; background: none; border: 1px solid transparent; border-radius: 999px; cursor: pointer; font: 12px var(--mono); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.nav-link:hover { border-color: var(--line-2); color: var(--text-2); }
+.nav-link svg { width: 15px; height: 15px; }
+.server { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; margin: -6px -10px; background: none; border: 1px solid transparent; border-radius: 999px; cursor: pointer; font: 12px var(--mono); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
 .server:hover { border-color: var(--line-2); color: var(--text-2); }
 .server .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
 .server[data-state='online'] .dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim), 0 0 10px var(--accent); }
@@ -110,6 +114,31 @@ button { font: inherit; color: inherit; }
 .dialog-actions .spacer { flex: 1; }
 .btn:disabled { opacity: 0.6; cursor: progress; }
 
+/* Feedback dialog: shares the server dialog's frame. */
+.feedback-dialog form, .feedback-sent { padding: 28px; display: flex; flex-direction: column; gap: 14px; }
+.feedback-dialog .field textarea { min-height: 104px; padding: 12px 14px; resize: vertical; background: var(--bg-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 10px; font: 14px/1.5 var(--sans); }
+.feedback-dialog .field textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.feedback-dialog .field input { font-family: var(--sans); }
+.feedback-dialog .field textarea::placeholder, .feedback-dialog .field input::placeholder { color: var(--text-3); }
+.optional { font-weight: 400; color: var(--text-3); font-size: 13px; margin-left: 6px; }
+.rating { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 8px; }
+.rating legend { padding: 0; margin-bottom: 8px; }
+.stars { display: flex; align-items: center; gap: 4px; }
+.stars button { width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: none; cursor: pointer; color: var(--text-3); }
+.stars button:hover { background: var(--surface-2); }
+.stars svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.5; transition: transform 0.12s ease; }
+.stars button.on { color: var(--accent); }
+.stars button.on svg { fill: var(--accent); }
+.stars button:active svg { transform: scale(0.9); }
+.rating-label { margin-left: 10px; color: var(--text-3); }
+.option.attach { padding: 14px 16px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-2); align-items: flex-start; }
+.option.attach .switch { margin-top: 2px; }
+.feedback-sent { align-items: flex-start; }
+.sent-mark { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); }
+.sent-mark svg { width: 22px; height: 22px; }
+.feedback-sent .dialog-actions { align-self: stretch; }
+.result-bar .btn.link.rate { margin-top: 8px; padding: 2px 0; font-size: 13.5px; }
+
 /* Shown on the landing page when no backend answers. */
 .offline-note { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px 16px; margin: 0 0 32px; padding: 16px 20px; background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r); }
 .offline-note p { margin: 0; color: var(--text-2); font-size: 14px; }
@@ -118,7 +147,9 @@ button { font: inherit; color: inherit; }
 .offline-actions { display: flex; align-items: center; gap: 12px; }
 @media (max-width: 480px) {
   .dialog-actions .spacer { display: none; }
-  .dialog-actions .btn:not(.link) { flex: 1 1 40%; }
+  .dialog-actions .btn:not(.link) { flex: 1 1 40%; padding: 0 14px; white-space: nowrap; }
+  .feedback-dialog form, .feedback-sent { padding: 22px 20px; }
+  .option.attach { padding: 12px 14px; gap: 14px; }
 }
 @media (max-width: 720px) {
   .offline-note { grid-template-columns: auto 1fr; }
@@ -336,6 +367,8 @@ model-viewer { background: transparent; --poster-color: transparent; }
   .result-actions .btn { width: 100%; }
 }
 @media (max-width: 420px) {
+  .nav-end { gap: 18px; }
+  .nav-link-text { display: none; }
   .flow li { padding-right: 10px; }
   .checklist { grid-auto-flow: row; grid-template-rows: none; grid-template-columns: 1fr; }
 }

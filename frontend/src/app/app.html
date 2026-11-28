@@ -18,11 +18,19 @@
     }
   </ol>
 
+  <div class="nav-end">
+  @if (feedbackOn()) {
+    <button type="button" class="nav-link" aria-label="Send feedback" (click)="openFeedback()">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3v-3H5a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg>
+      <span class="nav-link-text">Feedback</span>
+    </button>
+  }
   <button type="button" class="server" (click)="openServerDialog()"
     [attr.data-state]="apiOnline() === null ? 'checking' : apiOnline() ? 'online' : 'offline'"
     [attr.aria-label]="'Generation server: ' + (apiOnline() === null ? 'connecting' : apiOnline() ? 'ready' : 'offline') + '. Change server'">
     <span class="dot"></span>{{ apiOnline() === null ? 'Connecting' : apiOnline() ? 'Server ready' : 'Server offline' }}
   </button>
+  </div>
 </header>
 
 <main class="page">
@@ -115,6 +123,9 @@
           <div>
             <h2>{{ baseName() }}</h2>
             <p class="meta">GLB · {{ formatBytes(d.size) }} · made in {{ formatTime(d.seconds) }}</p>
+            @if (feedbackOn()) {
+              <button type="button" class="btn link rate" (click)="openFeedback()">How did this one turn out? Tell us</button>
+            }
           </div>
           <div class="result-actions">
             <button class="btn quiet" (click)="reset()">New photo</button>
@@ -279,3 +290,5 @@
     </p>
   </form>
 </dialog>
+
+<app-feedback-dialog [photo]="file()" [modelUrl]="modelUrl()" [context]="feedbackContext()" />
