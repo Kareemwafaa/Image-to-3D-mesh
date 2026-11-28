@@ -188,6 +188,7 @@ button { font: inherit; color: inherit; }
 .drop-text { display: flex; flex-direction: column; gap: 4px; }
 .drop-title { font-weight: 600; font-size: 16px; }
 .drop-sub { color: var(--text-3); }
+.drop-note { margin: 14px 0 0; max-width: 520px; font-size: 13.5px; color: var(--text-3); }
 
 .tips { list-style: none; padding: 0; margin: 8px 0 0; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: var(--r); background: var(--bg-2); }
 .tips li { padding: 20px 22px; display: flex; flex-direction: column; gap: 4px; }
