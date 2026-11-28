@@ -117,6 +117,21 @@ views instead of Zero123++'s) separates the diffusion model's error from the rec
 > Results pending the first Kaggle run. Protocol and caveats: [docs/benchmark.md](docs/benchmark.md).
 > Run it yourself with [`notebooks/facet_benchmark.ipynb`](notebooks/facet_benchmark.ipynb) on a free T4.
 
+### Known limitations
+
+Best results come from **a single solid object on a plain white background**. From hands-on tests:
+
+| Input | How it does |
+| --- | --- |
+| Solid objects (mugs, shoes, toys, tools) | Good: right shape and colour |
+| Busy backgrounds | Fine, as the background is removed first |
+| Thin parts (handles, straps) | Usually kept, sometimes thinner than real |
+| Small printed text and logos | Blurry: the generated views are only 320 px each |
+| Faces and people | Experimental: the shape is rough and the likeness is weak |
+| Glass and see-through objects | Not supported yet: the views have no consistent surface to rebuild |
+
+These come from the multi-view diffusion stage, which was trained mostly on solid, opaque objects.
+
 ## Run it
 
 The models need an NVIDIA GPU with roughly 12 GB of memory or more (the free T4 has 15 GB).
