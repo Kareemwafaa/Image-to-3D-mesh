@@ -1,7 +1,7 @@
 # In-app feedback
 
-The **Feedback** button in the top bar (and the "How did this one turn out?" link under a finished
-model) opens a small form: a 1 to 5 star rating, a message, an optional email, and an opt-in switch to
+The **Feedback** button at the bottom right of the 3D viewer, shown once a model is generated,
+opens a small form: a 1 to 5 star rating, a message, an optional email, and an opt-in switch to
 include the photo and the generated model. The switch is off by default, so nothing but the text is
 sent unless the person turns it on.
 

@@ -18,6 +18,6 @@ describe('App', () => {
   it('hides the Feedback button until feedback is set up', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('.nav-link')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.viewer-feedback')).toBeNull();
   });
 });
