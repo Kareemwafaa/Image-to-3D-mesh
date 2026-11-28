@@ -302,7 +302,6 @@ button { font: inherit; color: inherit; }
   background: radial-gradient(ellipse at 50% 35%, #1b222c, #0d1116 75%);
   transition: background 0.3s ease;
 }
-.result.no-grid::before { display: none; }
 /* Perspective floor grid under the model. */
 .result::before {
   content: ''; position: absolute; left: -50%; right: -50%; bottom: -10%; height: 60%; pointer-events: none;

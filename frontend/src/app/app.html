@@ -20,8 +20,8 @@
 
   <button type="button" class="server" (click)="openServerDialog()"
     [attr.data-state]="apiOnline() === null ? 'checking' : apiOnline() ? 'online' : 'offline'"
-    [attr.aria-label]="'Generation server: ' + (apiOnline() === null ? 'connecting' : apiOnline() ? 'ready' : 'offline') + '. Change server'">
-    <span class="dot"></span>{{ apiOnline() === null ? 'Connecting' : apiOnline() ? 'Server ready' : 'Server offline' }}
+    [attr.aria-label]="'Generation server: ' + (apiOnline() === null ? 'connecting' : apiOnline() ? 'up' : 'down') + '. Change server'">
+    <span class="dot"></span>{{ apiOnline() === null ? 'Connecting' : apiOnline() ? 'Server up' : 'Server down' }}
   </button>
 </header>
 
@@ -95,7 +95,7 @@
     @case ('done') {
       @let d = phase();
       @if (d.kind === 'done') {
-        <section class="stage result" [class.no-grid]="!showGrid()">
+        <section class="stage result">
           <app-model-viewer [src]="d.modelUrl" [alt]="'3D model made from ' + baseName()" [autoRotate]="autoRotate()" />
           @if (preview(); as src) {
             <figure class="pip vf"><img [src]="src" alt="Original photo" /><figcaption class="mono">Source</figcaption></figure>
@@ -103,9 +103,6 @@
           <div class="viewer-tools">
             <button type="button" [class.on]="autoRotate()" (click)="autoRotate.set(!autoRotate())" [attr.aria-pressed]="autoRotate()">
               Turntable
-            </button>
-            <button type="button" [class.on]="showGrid()" (click)="showGrid.set(!showGrid())" [attr.aria-pressed]="showGrid()">
-              Floor grid
             </button>
           </div>
           <p class="viewer-hint">Drag to rotate · scroll to zoom</p>
