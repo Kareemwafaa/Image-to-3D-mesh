@@ -34,6 +34,8 @@ flowchart LR
 
 Why InstantMesh is the default, with its theory, is in
 [ADR 0010](../docs/architecture/adr/0010-instantmesh-texture-baking-cleanup.md).
+`app/bench/` measures both reconstructors against scanned ground truth (Chamfer distance,
+F-score, normal consistency, time, GPU memory); see [docs/benchmark.md](../docs/benchmark.md).
 
 Around the pipeline sits a small distributed system: a FastAPI gateway, a
 Redis Streams job queue, GPU workers, Postgres and S3 storage, with retries,

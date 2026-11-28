@@ -100,7 +100,47 @@ class MultiViewBackend:
         mesh = meshing.extract_mesh(model, options.mc_resolution, device=self.device)
         return np.asarray(mesh.vertices), np.asarray(mesh.faces), np.asarray(mesh.visual.vertex_colors)
 
-    # --- the job ------------------------------------------------------------------------------
+    # --- the job, in steps (the benchmark calls the steps one by one) -----------------
+    def make_views(
+        self, image: Image.Image, options: GenerateOptions, progress: ProgressFn | None = None
+    ) -> tuple[list[Image.Image], np.ndarray, np.ndarray]:
+        """Zero123++ views of the segmented input, and a silhouette mask per view.
+        Returns (views, (6, H, W, 3) float views in [0, 1], (6, H, W) masks)."""
+        progress = progress or _no_progress
+        progress(_MV[0], "multiview")
+        views = self.generator.generate(image, steps=options.diffusion_steps, seed=options.seed)
+        if self.low_vram:
+            self.generator.offload()
+        progress(_MV[1], "segmenting_views")
+        mask_arr = np.stack([segmentation.view_mask(v) for v in views])
+        return views, multiview.views_to_arrays(views), mask_arr
+
+    def reconstruct_views(
+        self,
+        view_arr: np.ndarray,
+        mask_arr: np.ndarray,
+        options: GenerateOptions,
+        progress: ProgressFn | None = None,
+    ):
+        """Views -> cleaned z-up mesh, with the reconstructor's per-vertex colours.
+        Returns (trimesh.Trimesh, (N, 3|4) uint8 colours or None)."""
+        progress = progress or _no_progress
+        method = options.reconstructor
+        if method not in RECONSTRUCTORS:
+            raise ValueError(f"Unknown reconstructor {method!r}")
+        if method == "instantmesh":
+            verts, faces, colors = self._instantmesh(view_arr, mask_arr, progress)
+        else:
+            verts, faces, colors = self._neus(view_arr, mask_arr, options, progress)
+        progress(_CLEAN, "meshing")
+        smooth = options.smooth_iters if options.smooth_iters is not None else _SMOOTHING[method]
+        return postprocess.clean_mesh(
+            verts,
+            faces,
+            colors,
+            postprocess.CleanupConfig(smooth_iterations=smooth, target_faces=options.target_faces),
+        )
+
     def generate(
         self,
         image: Image.Image,
@@ -114,31 +154,11 @@ class MultiViewBackend:
         if method not in RECONSTRUCTORS:
             raise ValueError(f"Unknown reconstructor {method!r}")
         t0 = time.monotonic()
-        progress(_MV[0], "multiview")
-        views = self.generator.generate(image, steps=options.diffusion_steps, seed=options.seed)
+        views, view_arr, mask_arr = self.make_views(image, options, progress)
         multiview.make_grid(views).save(out_dir / "views.png")
-        if self.low_vram:
-            self.generator.offload()
         t1 = time.monotonic()
 
-        progress(_MV[1], "segmenting_views")
-        mask_arr = np.stack([segmentation.view_mask(v) for v in views])
-        view_arr = multiview.views_to_arrays(views)
-
-        if method == "instantmesh":
-            verts, faces, colors = self._instantmesh(view_arr, mask_arr, progress)
-        else:
-            verts, faces, colors = self._neus(view_arr, mask_arr, options, progress)
-        t2 = time.monotonic()
-
-        progress(_CLEAN, "meshing")
-        smooth = options.smooth_iters if options.smooth_iters is not None else _SMOOTHING[method]
-        mesh, colors = postprocess.clean_mesh(
-            verts,
-            faces,
-            colors,
-            postprocess.CleanupConfig(smooth_iterations=smooth, target_faces=options.target_faces),
-        )
+        mesh, colors = self.reconstruct_views(view_arr, mask_arr, options, progress)
         t3 = time.monotonic()
 
         if options.texture:
@@ -161,14 +181,17 @@ class MultiViewBackend:
         progress(0.97, "export")
         meshing.export_glb(mesh, out_dir / "result.glb")
         log.info(
-            "%s: multiview %.1fs, reconstruction %.1fs, cleanup %.1fs, texture %.1fs, %d faces",
+            "%s: multiview %.1fs, reconstruction + cleanup %.1fs, texture %.1fs, %d faces",
             method,
             t1 - t0,
-            t2 - t1,
-            t3 - t2,
+            t3 - t1,
             time.monotonic() - t3,
             len(mesh.faces),
         )
+
+
+def _no_progress(value: float, stage: str | None = None) -> None:
+    pass
 
 
 # Old name, kept so existing imports keep working.
