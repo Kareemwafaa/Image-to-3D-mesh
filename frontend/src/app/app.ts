@@ -3,6 +3,8 @@ import { ApiError, ApiService, JobStatus, normalizeApiUrl, Reconstructor } from 
 import { ModelViewer } from './model-viewer';
 import { PointCloud } from './point-cloud';
 import { NgTemplateOutlet } from '@angular/common';
+import { FeedbackDialog } from './feedback-dialog';
+import { FeedbackService } from './feedback.service';
 
 const POLL_MS = 2500;
 // Consecutive failed status checks tolerated before giving up (network blips
@@ -44,14 +46,18 @@ type StepKey = (typeof PIPELINE)[number]['key'];
 
 @Component({
   selector: 'app-root',
-  imports: [ModelViewer, NgTemplateOutlet, PointCloud],
+  imports: [FeedbackDialog, ModelViewer, NgTemplateOutlet, PointCloud],
   templateUrl: './app.html',
 })
 export class App implements OnInit, OnDestroy {
   private readonly api = inject(ApiService);
+  private readonly feedback = inject(FeedbackService);
   private readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
   private readonly stage = viewChild<ElementRef<HTMLElement>>('stage');
   private readonly serverDialog = viewChild<ElementRef<HTMLDialogElement>>('serverDialog');
+  private readonly feedbackDialog = viewChild(FeedbackDialog);
+  /** The Feedback button shows only when config.json points at a Supabase project. */
+  protected readonly feedbackOn = computed(() => this.feedback.config() !== null);
   private abort?: AbortController;
   private timer?: ReturnType<typeof setInterval>;
   private healthTimer?: ReturnType<typeof setInterval>;
@@ -152,12 +158,33 @@ export class App implements OnInit, OnDestroy {
         return 'Failed';
     }
   });
+  /** Object URL of the finished model, offered as a feedback attachment. */
+  protected readonly modelUrl = computed(() => {
+    const p = this.phase();
+    return p.kind === 'done' ? p.modelUrl : null;
+  });
+  /** What was run, so a report can be reproduced. */
+  protected readonly feedbackContext = computed(() => {
+    const p = this.phase();
+    return {
+      screen: this.view(),
+      engine: this.engine(),
+      removeBackground: this.removeBg(),
+      resolution: this.engine() === 'neus' ? this.resolution() : null,
+      jobId: this.currentJobId() ?? null,
+      seconds: p.kind === 'done' ? p.seconds : null,
+      modelBytes: p.kind === 'done' ? p.size : null,
+      error: p.kind === 'error' ? p.message : null,
+    };
+  });
+
   protected readonly currentJobId = computed(() => {
     const p = this.phase();
     return 'jobId' in p ? p.jobId : undefined;
   });
 
   ngOnInit() {
+    this.feedback.load();
     this.checkHealth();
     this.healthTimer = setInterval(() => this.checkHealth(), HEALTH_MS);
 
@@ -184,6 +211,10 @@ export class App implements OnInit, OnDestroy {
     this.serverDraft.set(this.apiSource() === 'custom' ? (this.apiUrl() ?? '') : '');
     this.serverTest.set('idle');
     this.serverDialog()?.nativeElement.showModal();
+  }
+
+  protected openFeedback() {
+    this.feedbackDialog()?.open();
   }
 
   protected closeServerDialog() {

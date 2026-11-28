@@ -152,6 +152,10 @@ The frontend (Angular, in [`frontend/`](frontend/)) is a static site hosted on G
 
 The choice is remembered in your browser.
 
+A **Feedback** button lets visitors rate a result and, if they choose, attach their photo and the
+model. It goes straight to a private Supabase table with no server to run; see
+[docs/feedback.md](docs/feedback.md).
+
 ## Repository layout
 
 | Path | What is there |

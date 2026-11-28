@@ -26,6 +26,13 @@ runtime, first match wins:
 When no backend answers, the landing page offers to connect one. The backend must allow
 this app's origin in `CORS_ORIGINS` (`*` is fine: the API uses no cookies).
 
+### Feedback form
+
+The **Feedback** button sends a rating, a message and, only if the person opts in, the photo and the
+generated `.glb` straight to a Supabase project (no server of ours). It stays hidden until
+`feedback.supabaseUrl` and `feedback.supabaseAnonKey` are filled in `public/config.json`. Setup
+steps and the privacy rules: [`docs/feedback.md`](../docs/feedback.md).
+
 ## Build and test
 
 ```bash
